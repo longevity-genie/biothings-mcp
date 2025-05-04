@@ -189,18 +189,20 @@ class GeneRoutesMixin:
             species: Optional[str] = Query(None, description="Species names or taxonomy ids", examples=["9606", "10090", "9606,10090"]),
             email: Optional[str] = Query(None, description="User email for tracking usage", examples=["user@example.com"]),
             as_dataframe: bool = Query(False, description="Return results as pandas DataFrame", examples=[True, False]),
-            df_index: bool = Query(True, description="Index DataFrame by query (only if as_dataframe=True)", examples=[True, False])
+            df_index: bool = Query(True, description="Index DataFrame by query (only if as_dataframe=True)", examples=[True, False]),
+            size: int = Query(10, description="Maximum number of results to return per query term (max 1000)", examples=[1, 10, 50])
         ):
             """Batch query genes"""
-            log_message(message_type="debug:query_many_genes:entry", query_list=query_list, scopes=scopes)
-            with start_action(action_type="api:query_many_genes", query_list=str(query_list), scopes=str(scopes), fields=str(fields), species=str(species), email=str(email), as_dataframe=str(as_dataframe), df_index=str(df_index)):
+            log_message(message_type="debug:query_many_genes:entry", query_list=query_list, scopes=scopes, size=size)
+            with start_action(action_type="api:query_many_genes", query_list=str(query_list), scopes=str(scopes), fields=str(fields), species=str(species), email=str(email), as_dataframe=str(as_dataframe), df_index=str(df_index), size=size):
                 try:
                     async with GeneClientAsync() as client:
                         log_message(message_type="debug:query_many_genes:context_entered")
                         # Simplify call to match test_querymany_async
                         _query_list = query_list.split(",")
                         _scopes = scopes.split(",") if scopes else None
-                        result = await client.querymany(_query_list, scopes=_scopes)
+                        # Pass size to the client call
+                        result = await client.querymany(_query_list, scopes=_scopes, size=size) 
                         log_message(message_type="debug:query_many_genes:raw_result", result=repr(result))
 
                     # Process result (keeping robust handling)
