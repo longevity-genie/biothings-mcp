@@ -1,0 +1,24 @@
+services:
+  app:
+    image: ghcr.io/longevity-genie/biothings-mcp:latest
+    ports:
+      - "3001:3001"
+    environment:
+      - MCP_PORT=3001
+    networks:
+      - mcp-network
+
+  inspector:
+    image: mcp/inspector
+    ports:
+      - "6277:6277"
+    environment:
+      - MCP_SERVER_URL=http://app:3001/mcp
+    depends_on:
+      - app
+    networks:
+      - mcp-network
+
+networks:
+  mcp-network:
+    driver: bridge 

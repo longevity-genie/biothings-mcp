@@ -65,6 +65,37 @@ uv sync
 uv run server
 ```
 
+### Docker Deployment
+
+The easiest way to run the MCP server is using Docker. The project provides a pre-built Docker image available on GitHub Container Registry.
+
+1. Using Docker Compose (recommended):
+
+```bash
+# Clone the repository
+git clone git@github.com:longevity-genie/biothings-mcp.git
+cd biothings-mcp
+
+# Start the services
+docker-compose up
+```
+
+This will start:
+- The MCP server on port 3001
+- The MCP Inspector on port 6277
+
+2. Using Docker directly:
+
+```bash
+# Pull the latest image
+docker pull ghcr.io/longevity-genie/biothings-mcp:latest
+
+# Run the container
+docker run -p 3001:3001 -e MCP_PORT=3001 ghcr.io/longevity-genie/biothings-mcp:latest
+```
+
+The MCP server will be available at `http://localhost:3001/mcp`.
+
 ### Integration with AI Systems
 
 Configure your AI system to use the MCP server in one of two ways:
@@ -89,7 +120,7 @@ Configure your AI system to use the MCP server in one of two ways:
       "args": [
         "mcp-remote",
         "http://localhost:3001/mcp",
-        "8080"  // Optional port number for OAuth support
+        "6277"  // Optional port number for OAuth support
       ]
     }
   }
