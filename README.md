@@ -2,9 +2,13 @@
 [![Tests](https://github.com/longevity-genie/biothings-mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/longevity-genie/biothings-mcp/actions/workflows/tests.yml)
 [![PyPI version](https://badge.fury.io/py/biothings-mcp.svg)](https://badge.fury.io/py/biothings-mcp)
 
-MCP (Model Context Protocol) server for biothings
+MCP (Model Context Protocol) server for Biothings.io
 
-This server implements the Model Context Protocol (MCP) for BioThings, providing a standardized interface for accessing and manipulating biomedical data. MCP enables AI assistants and agents to access specialized biomedical knowledge through structured interfaces to authoritative data sources.
+This server implements the Model Context Protocol (MCP) for BioThings, providing a standardized interface for accessing and manipulating biomedical data. MCP enables AI assistants and agents to access specialized biomedical knowledge through structured interfaces to authoritative data sources. Supported BioThings data sources include:
+
+- [mygene.info](https://mygene.info) — Gene annotation and query service
+- [myvariant.info](https://myvariant.info) — Variant annotation and query service
+- [mychem.info](https://mychem.info) — Chemical compound annotation and query service
 
 ## About MCP (Model Context Protocol)
 
@@ -15,27 +19,14 @@ MCP is a protocol that bridges the gap between AI systems and specialized domain
 - **Type Safety**: Strong typing and validation through biothings-typed-client
 - **AI Integration**: Seamless integration with AI assistants and agents
 
-## Features
+## Available API Interfaces
 
-- **Type-Safe API**: Built on top of biothings-typed-client for type-safe access to BioThings services
-- **Standardized Protocol**: Implements the MCP specification for consistent data access
-- **Multiple Data Types**: Supports access to various biomedical data types including:
-  - Genes
-  - Variants
-  - Chemicals
-  - Taxons
-- **Synchronous & Asynchronous**: Supports both synchronous and asynchronous operations
-- **Validation**: Built-in data validation and type checking
-- **AI Integration**: Designed for seamless integration with AI systems and agents
+This server provides dedicated API interfaces for different BioThings data types, leveraging the `biothings-typed-client` library. These interfaces are implemented using the following mixins:
 
-## Available Clients
-
-The server provides access to the following typed clients from biothings-typed-client:
-
-- `VariantClient` / `VariantClientAsync`: For accessing variant data
-- `GeneClient` / `GeneClientAsync`: For accessing gene data
-- `ChemClient` / `ChemClientAsync`: For accessing chemical compound data
-- `TaxonClient` / `TaxonClientAsync`: For accessing taxonomic information
+- **Gene Interface**: `GeneRoutesMixin` (wraps `GeneClientAsync`)
+- **Variant Interface**: `VariantsRoutesMixin` (wraps `VariantClientAsync`)
+- **Chemical Interface**: `ChemRoutesMixin` (wraps `ChemClientAsync`)
+- **Taxon Interface**: `TaxonRoutesMixin` (wraps `TaxonClientAsync`)
 
 ## Quick Start
 
@@ -94,7 +85,9 @@ docker pull ghcr.io/longevity-genie/biothings-mcp:latest
 docker run -p 3001:3001 -e MCP_PORT=3001 ghcr.io/longevity-genie/biothings-mcp:latest
 ```
 
-The MCP server will be available at `http://localhost:3001/mcp`.
+The MCP server will be available at `http://localhost:3001/mcp` (with docs at http://localhost:3001/docs).
+
+A publicly hosted version of this server is also available at `https://biothings.longevity-genie.info/mcp` (with docs at https://biothings.longevity-genie.info/docs)
 
 ### Integration with AI Systems
 
