@@ -25,6 +25,20 @@ class VariantQueryResponse(BaseModel):
     max_score: Optional[float] = None
     took: Optional[int] = None
 
+# Define a similar query response model for chemicals
+class ChemQueryResponse(BaseModel):
+    hits: List[ChemResponse]
+    total: Optional[int] = None
+    max_score: Optional[float] = None
+    took: Optional[int] = None
+
+# Define a similar query response model for taxons
+class TaxonQueryResponse(BaseModel):
+    hits: List[TaxonResponse]
+    total: Optional[int] = None
+    max_score: Optional[float] = None
+    took: Optional[int] = None
+
 class MetadataResponse(BaseModel):
     stats: Dict[str, Any]
     fields: Optional[Dict[str, Any]] = None
@@ -758,6 +772,171 @@ class VariantsRoutesMixin:
 class ChemRoutesMixin:
     def _chem_routes_config(self):
         """Configure chemical routes for the API"""
+
+        # Define query routes BEFORE specific ID routes
+        @self.get(
+            "/chem/query",
+            response_model=ChemQueryResponse,
+            tags=["chemicals"],
+            summary="Query chemicals using a search string",
+            description="""
+            Search for chemical compounds using a query string with various filtering options.
+            
+            This endpoint supports complex queries with the following features:
+            
+            1. Simple Queries:
+               - "C6H12O6" - Find compounds with molecular formula C6H12O6
+               - "glucose" - Find compounds with name containing "glucose"
+            
+            2. Fielded Queries:
+               - "pubchem.molecular_formula:C6H12O6" - Find compounds with specific formula
+               - "pubchem.molecular_weight:[100 TO 200]" - Find compounds in weight range
+               - "pubchem.xlogp:>2" - Find compounds with logP > 2
+               - "pubchem.hydrogen_bond_donor_count:>2" - Find compounds with >2 H-bond donors
+            
+            3. Range Queries:
+               - "pubchem.molecular_weight:[100 TO 200]" - Find compounds in weight range
+               - "pubchem.xlogp:>2" - Find compounds with logP > 2
+               - "pubchem.topological_polar_surface_area:[50 TO 100]" - Find compounds in TPSA range
+            
+            4. Boolean Queries:
+               - "pubchem.hydrogen_bond_donor_count:>2 AND pubchem.hydrogen_bond_acceptor_count:>4"
+               - "pubchem.molecular_weight:[100 TO 200] AND pubchem.xlogp:>2"
+               - "pubchem.molecular_formula:C6H12O6 AND NOT pubchem.inchi_key:KTUFNOKKBVMGRW-UHFFFAOYSA-N"
+            
+            The response includes pagination information and can be returned as a pandas DataFrame.
+            """
+        )
+        async def query_chems(
+            q: str = Query(
+                ...,
+                description="Query string",
+                examples=[
+                    "C6H12O6",
+                    "pubchem.molecular_formula:C6H12O6",
+                    "pubchem.molecular_weight:[100 TO 200]",
+                    "pubchem.xlogp:>2",
+                    "pubchem.hydrogen_bond_donor_count:>2 AND pubchem.hydrogen_bond_acceptor_count:>4"
+                ]
+            ),
+            fields: Optional[str] = Query(
+                None,
+                description="Comma-separated list of fields to return",
+                examples=[
+                    "pubchem.molecular_formula,pubchem.molecular_weight",
+                    "pubchem.smiles,pubchem.inchi",
+                    "pubchem.hydrogen_bond_donor_count,pubchem.hydrogen_bond_acceptor_count"
+                ]
+            ),
+            size: int = Query(10, description="Maximum number of results to return (max 1000)", examples=[10, 50, 100]),
+            skip: int = Query(0, description="Number of results to skip (for pagination)", examples=[0, 10, 20]),
+            sort: Optional[str] = Query(None, description="Sort field, prefix with '-' for descending order", examples=["_score", "-_score", "pubchem.molecular_weight"]),
+            email: Optional[str] = Query(None, description="User email for tracking usage", examples=["user@example.com"]),
+            as_dataframe: bool = Query(False, description="Return results as pandas DataFrame", examples=[True, False]),
+            df_index: bool = Query(True, description="Index DataFrame by query (only if as_dataframe=True)", examples=[True, False])
+        ):
+            """Query chemicals"""
+            with start_action(action_type="api:query_chems", q=str(q), fields=str(fields), size=size, skip=skip, sort=str(sort), email=str(email), as_dataframe=as_dataframe, df_index=df_index):
+                async with ChemClientAsync() as client:
+                    # Call the query method
+                    result = await client.query(
+                        q,
+                        fields=fields.split(",") if fields else None,
+                        size=size,
+                        skip=skip,
+                        sort=sort,
+                        email=email,
+                        as_dataframe=as_dataframe,
+                        df_index=df_index
+                    )
+                    # Validate and structure the response according to ChemQueryResponse
+                    validated_hits = []
+                    if isinstance(result, dict) and "hits" in result and isinstance(result["hits"], list):
+                        for hit in result["hits"]:
+                            try:
+                                # Individual hits still need validation if they are meant to be ChemResponse
+                                validated_hits.append(ChemResponse.model_validate(hit))
+                            except Exception as e:
+                                log_message(message_type="warning:query_chems:hit_validation_error", error=str(e), hit=repr(hit))
+                                pass 
+                    
+                    return ChemQueryResponse(
+                        hits=validated_hits,
+                        total=result.get("total") if isinstance(result, dict) else None,
+                        max_score=result.get("max_score") if isinstance(result, dict) else None,
+                        took=result.get("took") if isinstance(result, dict) else None,
+                    )
+
+        @self.get(
+            "/chems/querymany",
+            tags=["chemicals"],
+            summary="Batch query chemicals",
+            description="""
+            Perform multiple chemical queries in a single request.
+            
+            This endpoint is useful for batch processing of chemical queries. It supports:
+            
+            1. Multiple Query Types:
+               - Molecular formula queries: ["C6H12O6", "C12H22O11"]
+               - Name queries: ["glucose", "sucrose"]
+               - Mixed queries: ["C6H12O6", "sucrose"]
+            
+            2. Field Scoping:
+               - Search in specific fields: scopes=["pubchem.molecular_formula", "pubchem.iupac"]
+               - Search in all fields: scopes=None
+            
+            3. Result Filtering:
+               - Return specific fields: fields=["pubchem.molecular_weight", "pubchem.xlogp"]
+               - Return all fields: fields=None
+            
+            The response can be returned as a pandas DataFrame for easier data manipulation.
+            """
+        )
+        async def query_many_chems(
+            query_list: str = Query(
+                ...,
+                description="Comma-separated list of query strings",
+                examples=[
+                    "C6H12O6,C12H22O11",
+                    "glucose,sucrose",
+                    "C6H12O6,sucrose"
+                ]
+            ),
+            scopes: Optional[str] = Query(
+                None,
+                description="Comma-separated list of fields to search in",
+                examples=[
+                    "pubchem.molecular_formula,pubchem.iupac",
+                    "pubchem.smiles,pubchem.inchi",
+                    "pubchem.molecular_weight,pubchem.xlogp"
+                ]
+            ),
+            fields: Optional[str] = Query(
+                None,
+                description="Comma-separated list of fields to return",
+                examples=[
+                    "pubchem.molecular_formula,pubchem.molecular_weight",
+                    "pubchem.smiles,pubchem.inchi",
+                    "pubchem.hydrogen_bond_donor_count,pubchem.hydrogen_bond_acceptor_count"
+                ]
+            ),
+            email: Optional[str] = Query(None, description="User email for tracking usage", examples=["user@example.com"]),
+            as_dataframe: bool = Query(False, description="Return results as pandas DataFrame", examples=[True, False]),
+            df_index: bool = Query(True, description="Index DataFrame by query (only if as_dataframe=True)", examples=[True, False])
+        ):
+            """Batch query chemicals"""
+            with start_action(action_type="api:query_many_chems", query_list=str(query_list), scopes=str(scopes), fields=str(fields), email=str(email), as_dataframe=as_dataframe, df_index=df_index):
+                async with ChemClientAsync() as client:
+                    return await client.querymany(
+                        query_list.split(","),
+                        scopes=scopes.split(",") if scopes else None,
+                        fields=fields.split(",") if fields else None,
+                        email=email,
+                        as_dataframe=as_dataframe,
+                        df_index=df_index
+                    )
+
+        # Define specific ID routes AFTER query routes
         @self.get(
             "/chem/{chem_id}",
             response_model=ChemResponse,
@@ -889,149 +1068,6 @@ class ChemRoutesMixin:
                         df_index=df_index
                     )
 
-        @self.get(
-            "/chem/query",
-            tags=["chemicals"],
-            summary="Query chemicals using a search string",
-            description="""
-            Search for chemical compounds using a query string with various filtering options.
-            
-            This endpoint supports complex queries with the following features:
-            
-            1. Simple Queries:
-               - "C6H12O6" - Find compounds with molecular formula C6H12O6
-               - "glucose" - Find compounds with name containing "glucose"
-            
-            2. Fielded Queries:
-               - "pubchem.molecular_formula:C6H12O6" - Find compounds with specific formula
-               - "pubchem.molecular_weight:[100 TO 200]" - Find compounds in weight range
-               - "pubchem.xlogp:>2" - Find compounds with logP > 2
-               - "pubchem.hydrogen_bond_donor_count:>2" - Find compounds with >2 H-bond donors
-            
-            3. Range Queries:
-               - "pubchem.molecular_weight:[100 TO 200]" - Find compounds in weight range
-               - "pubchem.xlogp:>2" - Find compounds with logP > 2
-               - "pubchem.topological_polar_surface_area:[50 TO 100]" - Find compounds in TPSA range
-            
-            4. Boolean Queries:
-               - "pubchem.hydrogen_bond_donor_count:>2 AND pubchem.hydrogen_bond_acceptor_count:>4"
-               - "pubchem.molecular_weight:[100 TO 200] AND pubchem.xlogp:>2"
-               - "pubchem.molecular_formula:C6H12O6 AND NOT pubchem.inchi_key:KTUFNOKKBVMGRW-UHFFFAOYSA-N"
-            
-            The response includes pagination information and can be returned as a pandas DataFrame.
-            """
-        )
-        async def query_chems(
-            q: str = Query(
-                ...,
-                description="Query string",
-                examples=[
-                    "C6H12O6",
-                    "pubchem.molecular_formula:C6H12O6",
-                    "pubchem.molecular_weight:[100 TO 200]",
-                    "pubchem.xlogp:>2",
-                    "pubchem.hydrogen_bond_donor_count:>2 AND pubchem.hydrogen_bond_acceptor_count:>4"
-                ]
-            ),
-            fields: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to return",
-                examples=[
-                    "pubchem.molecular_formula,pubchem.molecular_weight",
-                    "pubchem.smiles,pubchem.inchi",
-                    "pubchem.hydrogen_bond_donor_count,pubchem.hydrogen_bond_acceptor_count"
-                ]
-            ),
-            size: int = Query(10, description="Maximum number of results to return (max 1000)", examples=[10, 50, 100]),
-            skip: int = Query(0, description="Number of results to skip (for pagination)", examples=[0, 10, 20]),
-            sort: Optional[str] = Query(None, description="Sort field, prefix with '-' for descending order", examples=["_score", "-_score", "pubchem.molecular_weight"]),
-            email: Optional[str] = Query(None, description="User email for tracking usage", examples=["user@example.com"]),
-            as_dataframe: bool = Query(False, description="Return results as pandas DataFrame", examples=[True, False]),
-            df_index: bool = Query(True, description="Index DataFrame by query (only if as_dataframe=True)", examples=[True, False])
-        ):
-            """Query chemicals"""
-            with start_action(action_type="api:query_chems", q=str(q), fields=str(fields), size=size, skip=skip, sort=str(sort), email=str(email), as_dataframe=as_dataframe, df_index=df_index):
-                async with ChemClientAsync() as client:
-                    return await client.query(
-                        q,
-                        fields=fields.split(",") if fields else None,
-                        size=size,
-                        skip=skip,
-                        sort=sort,
-                        email=email,
-                        as_dataframe=as_dataframe,
-                        df_index=df_index
-                    )
-
-        @self.get(
-            "/chems/querymany",
-            tags=["chemicals"],
-            summary="Batch query chemicals",
-            description="""
-            Perform multiple chemical queries in a single request.
-            
-            This endpoint is useful for batch processing of chemical queries. It supports:
-            
-            1. Multiple Query Types:
-               - Molecular formula queries: ["C6H12O6", "C12H22O11"]
-               - Name queries: ["glucose", "sucrose"]
-               - Mixed queries: ["C6H12O6", "sucrose"]
-            
-            2. Field Scoping:
-               - Search in specific fields: scopes=["pubchem.molecular_formula", "pubchem.iupac"]
-               - Search in all fields: scopes=None
-            
-            3. Result Filtering:
-               - Return specific fields: fields=["pubchem.molecular_weight", "pubchem.xlogp"]
-               - Return all fields: fields=None
-            
-            The response can be returned as a pandas DataFrame for easier data manipulation.
-            """
-        )
-        async def query_many_chems(
-            query_list: str = Query(
-                ...,
-                description="Comma-separated list of query strings",
-                examples=[
-                    "C6H12O6,C12H22O11",
-                    "glucose,sucrose",
-                    "C6H12O6,sucrose"
-                ]
-            ),
-            scopes: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to search in",
-                examples=[
-                    "pubchem.molecular_formula,pubchem.iupac",
-                    "pubchem.smiles,pubchem.inchi",
-                    "pubchem.molecular_weight,pubchem.xlogp"
-                ]
-            ),
-            fields: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to return",
-                examples=[
-                    "pubchem.molecular_formula,pubchem.molecular_weight",
-                    "pubchem.smiles,pubchem.inchi",
-                    "pubchem.hydrogen_bond_donor_count,pubchem.hydrogen_bond_acceptor_count"
-                ]
-            ),
-            email: Optional[str] = Query(None, description="User email for tracking usage", examples=["user@example.com"]),
-            as_dataframe: bool = Query(False, description="Return results as pandas DataFrame", examples=[True, False]),
-            df_index: bool = Query(True, description="Index DataFrame by query (only if as_dataframe=True)", examples=[True, False])
-        ):
-            """Batch query chemicals"""
-            with start_action(action_type="api:query_many_chems", query_list=str(query_list), scopes=str(scopes), fields=str(fields), email=str(email), as_dataframe=as_dataframe, df_index=df_index):
-                async with ChemClientAsync() as client:
-                    return await client.querymany(
-                        query_list.split(","),
-                        scopes=scopes.split(",") if scopes else None,
-                        fields=fields.split(",") if fields else None,
-                        email=email,
-                        as_dataframe=as_dataframe,
-                        df_index=df_index
-                    )
-            
 class TaxonRoutesMixin:
     def _taxon_routes_config(self):
         """Configure taxon routes for the API"""
@@ -1175,6 +1211,7 @@ class TaxonRoutesMixin:
 
         @self.get(
             "/taxon/query",
+            response_model=TaxonQueryResponse,
             tags=["taxons"],
             summary="Query taxa using a search string",
             description="""
@@ -1236,7 +1273,8 @@ class TaxonRoutesMixin:
         ):
             """Query taxa"""
             async with TaxonClientAsync() as client:
-                return await client.query(
+                # Call the query method
+                result = await client.query(
                     q,
                     fields=fields.split(",") if fields else None,
                     size=size,
@@ -1245,6 +1283,23 @@ class TaxonRoutesMixin:
                     email=email,
                     as_dataframe=as_dataframe,
                     df_index=df_index
+                )
+                # Validate and structure the response according to TaxonQueryResponse
+                validated_hits = []
+                if isinstance(result, dict) and "hits" in result and isinstance(result["hits"], list):
+                    for hit in result["hits"]:
+                        try:
+                            # Individual hits need validation
+                            validated_hits.append(TaxonResponse.model_validate(hit))
+                        except Exception as e:
+                            log_message(message_type="warning:query_taxons:hit_validation_error", error=str(e), hit=repr(hit))
+                            pass 
+                    
+                return TaxonQueryResponse(
+                    hits=validated_hits,
+                    total=result.get("total") if isinstance(result, dict) else None,
+                    max_score=result.get("max_score") if isinstance(result, dict) else None,
+                    took=result.get("took") if isinstance(result, dict) else None,
                 )
 
         @self.get(
