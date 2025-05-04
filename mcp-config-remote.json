@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "biothings-mcp": {
+      "type": "sse",
+      "url": "https://biothings.longevity-genie.info/mcp"
+    }
+  }
+}

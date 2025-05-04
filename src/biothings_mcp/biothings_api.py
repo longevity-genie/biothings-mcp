@@ -57,61 +57,80 @@ class GeneRoutesMixin:
             description="""
             Search for genes using a query string with various filtering options.
             
-            This endpoint supports complex queries with the following features:
+            **IMPORTANT:** This endpoint requires structured queries using specific field names. 
+            Simple natural language queries like "CDK2 gene" or "human kinase" will **NOT** work.
+            You **MUST** specify the field you are querying, e.g., `symbol:CDK2`, `name:"cyclin-dependent kinase 2"`, `taxid:9606`.
+            Use this endpoint when you need to *search* for genes based on criteria, not when you already know the specific gene ID.
+            If you know the exact Entrez or Ensembl ID, use the `/gene/{gene_id}` endpoint instead for faster retrieval.
+            If you only need general database information (like available fields or total gene count), use the `/gene/metadata` endpoint.
+
+            **Supported Query Features (based on Lucene syntax):**
+            1. Simple Term Queries:
+               - `q=cdk2` (Searches across default fields like symbol, name, aliases)
+               - `q="cyclin-dependent kinase"` (Searches for the exact phrase)
             
-            1. Simple Queries:
-               - "symbol:CDK2" - Find genes with symbol CDK2
-               - "name:cyclin-dependent kinase 2" - Find genes with specific name
+            2. Fielded Queries (specify the field to search):
+               - `q=symbol:CDK2`
+               - `q=name:"cyclin-dependent kinase 2"`
+               - `q=refseq:NM_001798`
+               - `q=ensembl.gene:ENSG00000123374`
+               - `q=entrezgene:1017`
+               - See [MyGene.info documentation](https://docs.mygene.info/en/latest/doc/query_service.html#available-fields) for more fields.
             
-            2. Fielded Queries:
-               - "refseq.rna:NM_001798" - Find genes with specific RefSeq RNA ID
-               - "ensembl.gene:ENSG00000123374" - Find genes with specific Ensembl ID
-            
-            3. Range Queries:
-               - "taxid:[9606 TO 10090]" - Find genes in specific taxonomy range
-               - "entrezgene:>1000" - Find genes with Entrez ID greater than 1000
+            3. Range Queries (for numerical or date fields):
+               - `q=taxid:[9606 TO 10090]` (Find genes in taxonomy range including 9606 and 10090)
+               - `q=entrezgene:>1000` (Find genes with Entrez ID greater than 1000)
             
             4. Boolean Queries:
-               - "symbol:CDK2 AND taxid:9606" - Find CDK2 gene in human
-               - "symbol:CDK* AND NOT taxid:9606" - Find CDK genes not in human
+               - `q=symbol:CDK2 AND taxid:9606` (Both conditions must be true)
+               - `q=symbol:CDK* AND NOT taxid:9606` (Find CDK genes not in human)
+               - `q=symbol:CDK2 OR symbol:BRCA1` (Either condition can be true)
+               - `q=(symbol:CDK2 OR symbol:BRCA1) AND taxid:9606` (Grouping)
             
             5. Wildcard Queries:
-               - "symbol:CDK*" - Find genes with symbol starting with CDK
-               - "name:*kinase*" - Find genes with 'kinase' in their name
+               - `q=symbol:CDK*` (Matches symbols starting with CDK)
+               - `q=name:*kinase*` (Matches names containing kinase)
+               - `q=symbol:CDK?` (Matches CDK followed by one character)
+
+            **Note:** See the [MyGene.info Query Syntax Guide](https://docs.mygene.info/en/latest/doc/query_service.html#query-syntax) for full details.
             
-            The response includes pagination information and can be returned as a pandas DataFrame.
+            The response includes pagination information (`total`, `max_score`, `took`) and the list of matching `hits`.
             """
         )
         async def query_genes(
             q: str = Query(
                 ...,
-                description="Query string",
+                description="Query string following Lucene syntax. See endpoint description for details and examples.",
                 examples=[
-                    "symbol:CDK2",
-                    "name:cyclin-dependent kinase 2",
-                    "refseq.rna:NM_001798",
-                    "taxid:[9606 TO 10090]",
-                    "symbol:CDK2 AND taxid:9606",
-                    "symbol:CDK* AND NOT taxid:9606",
-                    "name:*kinase*"
+                    "symbol:CDK2",  # Fielded query
+                    "name:\"cyclin-dependent kinase 2\"", # Phrase query
+                    "refseq.rna:NM_001798", # Dot notation field
+                    "taxid:[9606 TO 10090]", # Range query
+                    "symbol:CDK2 AND taxid:9606", # Boolean query
+                    "symbol:CDK* AND NOT taxid:9606", # Wildcard and boolean
+                    "name:*kinase*", # Wildcard query
+                    "(symbol:CDK2 OR symbol:BRCA1) AND taxid:9606", # Grouped boolean
+                    "entrezgene:>1000" # Range query
                 ]
             ),
             fields: Optional[str] = Query(
                 None,
-                description="Comma-separated list of fields to return",
+                description="Comma-separated list of fields to return from the matching gene hits. Supports dot notation (e.g., `refseq.rna`). If `fields=all`, all available fields are returned. Default: `symbol,name,taxid,entrezgene`.",
                 examples=[
+                    "symbol,name,taxid,entrezgene", # Default
                     "symbol,name,refseq.rna",
-                    "id,symbol,name,taxid",
-                    "ensembl.gene,uniprot.Swiss-Prot"
+                    "ensembl.gene,uniprot.Swiss-Prot",
+                    "summary,genomic_pos.chr,genomic_pos.start",
+                    "all" # Return all fields
                 ]
             ),
-            size: int = Query(10, description="Maximum number of results to return (max 1000)", examples=[10, 50, 100]),
-            skip: int = Query(0, description="Number of results to skip (for pagination)", examples=[0, 10, 20]),
-            sort: Optional[str] = Query(None, description="Sort field, prefix with '-' for descending order", examples=["_score", "-_score", "symbol"]),
-            species: Optional[str] = Query(None, description="Species names or taxonomy ids", examples=["9606", "10090", "9606,10090"]),
-            email: Optional[str] = Query(None, description="User email for tracking usage", examples=["user@example.com"]),
-            as_dataframe: bool = Query(False, description="Return results as pandas DataFrame", examples=[True, False]),
-            df_index: bool = Query(True, description="Index DataFrame by query (only if as_dataframe=True)", examples=[True, False])
+            size: int = Query(10, description="Maximum number of matching gene hits to return (capped at 1000). Default: 10.", examples=[10, 50, 1000]),
+            skip: int = Query(0, description="Number of matching gene hits to skip, starting from 0 (for pagination). Default: 0.", examples=[0, 10, 50]),
+            sort: Optional[str] = Query(None, description="Comma-separated fields to sort on. Prefix with `-` for descending order (e.g., `-symbol`). Default: sort by relevance score (`_score`) descending.", examples=["_score", "-_score", "symbol", "-entrezgene"]),
+            species: Optional[str] = Query(None, description="Filter results by species. Accepts comma-separated taxonomy IDs (e.g., `9606,10090`) or common names for human, mouse, rat, fruitfly, nematode, zebrafish, thale-cress, frog, pig. Default: searches all species.", examples=["9606", "human", "10090"]),
+            email: Optional[str] = Query(None, description="Optional user email for usage tracking.", examples=["user@example.com"]),
+            as_dataframe: bool = Query(False, description="Return results as a pandas DataFrame instead of JSON. Default: False.", examples=[True, False]),
+            df_index: bool = Query(True, description="When `as_dataframe=True`, index the DataFrame by the internal `_id`. Default: True.", examples=[True, False])
         ):
             """Query genes"""
             log_message(message_type="debug:query_genes:entry", q=q, size=size)
@@ -154,63 +173,64 @@ class GeneRoutesMixin:
             tags=["genes"],
             summary="Batch query genes",
             description="""
-            Perform multiple gene queries in a single request.
+            Perform multiple gene searches in a single request using a comma-separated list of query terms.
+            This endpoint essentially performs a batch query similar to the POST request described in the [MyGene.info documentation](https://docs.mygene.info/en/latest/doc/query_service.html#batch-queries-via-post).
+
+            **IMPORTANT:** Unlike `/gene/query`, the `query_list` parameter here takes multiple **terms** (like gene IDs, symbols, names) rather than full query strings.
+            The `scopes` parameter defines which fields these terms should be searched against.
+            Use this endpoint for batch *searching* of genes based on specific identifiers or terms within defined scopes.
+            If you know the exact Entrez or Ensembl IDs for multiple genes and want direct retrieval, use the `/genes` endpoint instead (which is generally faster for ID lookups).
+
+            **Endpoint Usage:**
+            - Query multiple symbols: `query_list=CDK2,BRCA1` with `scopes=symbol`
+            - Query multiple Entrez IDs: `query_list=1017,672` with `scopes=entrezgene`
+            - Query mixed IDs/symbols: `query_list=CDK2,672` with `scopes=symbol,entrezgene` (searches both scopes for each term)
             
-            This endpoint is useful for batch processing of gene queries. It supports:
-            
-            1. Multiple Query Types:
-               - Symbol queries: ["CDK2", "BRCA1"]
-               - Name queries: ["cyclin-dependent kinase 2", "breast cancer 1"]
-               - Mixed queries: ["CDK2", "ENSG00000123374"]
-            
-            2. Field Scoping:
-               - Search in specific fields: scopes=["symbol", "name"]
-               - Search in all fields: scopes=None
-            
-            3. Result Filtering:
-               - Return specific fields: fields=["symbol", "name", "refseq.rna"]
-               - Return all fields: fields=None
-            
-            4. Species Filtering:
-               - Filter by species: species=["9606"] (human)
-               - Filter by multiple species: species=["9606", "10090"] (human and mouse)
-            
-            The response can be returned as a pandas DataFrame for easier data manipulation.
+            **Result Interpretation:**
+            - The response is a list of matching gene objects.
+            - Each object includes a `query` field indicating which term from the `query_list` it matched.
+            - A single term from `query_list` might match multiple genes (e.g., a symbol matching genes in different species if `species` is not set, or matching multiple retired IDs).
+            - Terms with no matches are **omitted** from the response list (unlike the POST endpoint which returns a `notfound` entry).
             """
         )
         async def query_many_genes(
             query_list: str = Query(
                 ...,
-                description="Comma-separated list of query strings",
+                description="Comma-separated list of query terms (e.g., gene IDs, symbols, names). Do NOT use complex query strings here; use `/gene/query` for that.",
                 examples=[
-                    "CDK2,BRCA1",
-                    "cyclin-dependent kinase 2,breast cancer 1",
-                    "CDK2,ENSG00000123374"
+                    "1017,1018", # Entrez IDs
+                    "CDK2,BRCA1", # Symbols
+                    "ENSG00000123374,ENSG00000139618", # Ensembl IDs
+                    "1017,BRCA1", # Mixed IDs/Symbols
+                    "cyclin-dependent kinase 2,breast cancer 1" # Names (use quotes if spaces)
                 ]
             ),
             scopes: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to search in",
+                "entrezgene,ensemblgene,retired", # Default based on MyGene.info POST default
+                description="Comma-separated list of fields to search the terms in `query_list` against. Default: `entrezgene,ensemblgene,retired`.",
                 examples=[
-                    "symbol,name",
-                    "refseq.rna,ensembl.gene",
-                    "uniprot.Swiss-Prot"
+                    "symbol",
+                    "entrezgene",
+                    "ensembl.gene",
+                    "symbol,alias",
+                    "entrezgene,ensemblgene,retired" # Default
                 ]
             ),
             fields: Optional[str] = Query(
                 None,
-                description="Comma-separated list of fields to return",
+                description="Comma-separated list of fields to return from the matching gene hits. Default: `symbol,name,taxid,entrezgene`.",
                 examples=[
+                    "symbol,name,taxid,entrezgene", # Default
                     "symbol,name,refseq.rna",
-                    "id,symbol,name,taxid",
-                    "ensembl.gene,uniprot.Swiss-Prot"
+                    "ensembl.gene,uniprot.Swiss-Prot",
+                    "all" # Return all fields
                 ]
             ),
-            species: Optional[str] = Query(None, description="Species names or taxonomy ids", examples=["9606", "10090", "9606,10090"]),
-            email: Optional[str] = Query(None, description="User email for tracking usage", examples=["user@example.com"]),
-            as_dataframe: bool = Query(False, description="Return results as pandas DataFrame", examples=[True, False]),
-            df_index: bool = Query(True, description="Index DataFrame by query (only if as_dataframe=True)", examples=[True, False]),
-            size: int = Query(10, description="Maximum number of results to return per query term (max 1000)", examples=[1, 10, 50])
+            species: Optional[str] = Query(None, description="Filter results by species (comma-separated taxonomy IDs or common names). Default: searches all species.", examples=["9606", "human", "10090", "mouse,rat", "9606,10090"]),
+            email: Optional[str] = Query(None, description="Optional user email for usage tracking.", examples=["user@example.com"]),
+            as_dataframe: bool = Query(False, description="Return results as a pandas DataFrame. Default: False.", examples=[True, False]),
+            df_index: bool = Query(True, description="When `as_dataframe=True`, index the DataFrame by the matched `query` term. Default: True.", examples=[True, False]),
+            size: int = Query(10, description="Maximum number of hits to return *per query term* (capped at 1000). Default: 10.", examples=[1, 5, 10, 1000])
         ):
             """Batch query genes"""
             log_message(message_type="debug:query_many_genes:entry", query_list=query_list, scopes=scopes, size=size)
@@ -253,16 +273,16 @@ class GeneRoutesMixin:
             tags=["genes"],
             summary="Get gene database metadata",
             description="""
-            Retrieve metadata about the gene database.
+            Retrieve metadata about the underlying MyGene.info gene annotation database, **NOT** information about specific genes.
             
-            This endpoint returns information about:
-            - Total number of genes
-            - Database statistics
-            - Available fields and their types
-            - Index information
-            - Version information
+            **IMPORTANT:** Use this endpoint ONLY to understand the database itself (e.g., to discover available fields, check data versions, or get overall statistics). 
+            It **CANNOT** be used to find or retrieve data for any particular gene. Use `/gene/query` or `/gene/{gene_id}` for that.
             
-            The metadata can be used to understand the database structure and capabilities.
+            **Returned Information Includes:**
+            - `stats`: Database statistics (e.g., total number of genes).
+            - `fields`: Available gene annotation fields and their data types.
+            - `index`: Information about the backend data index.
+            - `version`: Data version information.
             """
         )
         async def get_gene_metadata():
@@ -300,87 +320,50 @@ class GeneRoutesMixin:
             tags=["genes"],
             summary="Get gene information by ID",
             description="""
-            Retrieves detailed information about a specific gene using its identifier.
+            Retrieves detailed information for a **single, specific gene** using its exact known identifier.
             
-            This endpoint supports both Entrez Gene IDs and Ensembl Gene IDs.
+            **IMPORTANT:** **This is the preferred endpoint over `/gene/query` for fetching a specific gene when you already know its standard ID (Entrez or Ensembl) and don't need complex search filters.** It's generally faster for direct lookups.
+            If you need to *search* for genes based on other criteria (like symbol, name, genomic location, function) or use complex boolean/range queries, use `/gene/query`.
             
-            Examples:
-            - Entrez ID: 1017 (CDK2 gene)
-            - Ensembl ID: ENSG00000123374 (CDK2 gene)
+            **Supported Identifiers:**
+            - Entrez Gene ID: e.g., `1017`
+            - Ensembl Gene ID: e.g., `ENSG00000123374`
             
-            The response includes comprehensive gene information such as:
-            - Basic information (ID, symbol, name)
-            - RefSeq information (genomic, protein, RNA)
-            - Taxonomy information
-            - Entrez Gene ID
-            - Ensembl information
-            - UniProt information
-            - Gene summary
-            - Genomic position information
-            
-            You can filter the returned fields using the 'fields' parameter.
+            The response includes comprehensive gene information (fields can be customized using the `fields` parameter).
+            If the ID is not found, a 404 error is returned.
             """
         )
         async def get_gene(
-            gene_id: str = Path(..., description="Gene identifier (Entrez or Ensembl ID)", examples=["1017", "ENSG00000123374"]),
+            gene_id: str = Path(..., description="Gene identifier (Entrez Gene ID or Ensembl Gene ID)", examples=["1017", "ENSG00000123374"]),
             fields: Optional[str] = Query(
                 None,
-                description="Comma-separated list of fields to return",
+                description="Comma-separated list of fields to return. Default: `symbol,name,taxid,entrezgene` (plus other core fields). Use `all` for everything.",
                 examples=[
-                    "symbol,name,refseq.rna",
-                    "id,symbol,name,taxid",
-                    "ensembl.gene,uniprot.Swiss-Prot"
+                    "symbol,name,taxid,entrezgene", # Default
+                    "symbol,name,summary",
+                    "refseq,uniprot",
+                    "all"
                 ]
             ),
             species: Optional[str] = Query(
                 None,
-                description="Species filter (e.g. '9606' for human)",
-                examples=["9606", "10090"]
+                description="Optional: Specify species (taxonomy ID or common name) to ensure the ID belongs to the correct species.",
+                examples=["9606", "human", "10090"]
             ),
             email: Optional[str] = Query(
                 None,
-                description="User email for tracking usage",
+                description="Optional user email for usage tracking.",
                 examples=["user@example.com"]
             ),
-            as_dataframe: bool = Query(
-                False,
-                description="Return results as pandas DataFrame",
-                examples=[True, False]
-            ),
-            df_index: bool = Query(
-                True,
-                description="Index DataFrame by query (only if as_dataframe=True)",
-                examples=[True, False]
-            ),
-            size: int = Query(
-                10,
-                description="Maximum number of results to return (max 1000)",
-                examples=[10, 50, 100]
-            ),
-            skip: int = Query(
-                0,
-                description="Number of results to skip (for pagination)",
-                examples=[0, 10, 20]
-            ),
-            sort: Optional[str] = Query(
-                None,
-                description="Sort field, prefix with '-' for descending order",
-                examples=["_score", "-_score", "symbol"]
-            )
+            # Parameters like as_dataframe, df_index, size, skip, sort are less relevant here 
+            # as it retrieves a single specific document, but kept for consistency with client method
+            as_dataframe: bool = Query(False, description="Return result as a pandas DataFrame. Default: False.", examples=[True, False], include_in_schema=False),
+            df_index: bool = Query(True, description="When `as_dataframe=True`, index DataFrame by `_id`. Default: True.", examples=[True, False], include_in_schema=False),
+            size: int = Query(10, description="Maximum number of results (irrelevant for single ID fetch).", include_in_schema=False),
+            skip: int = Query(0, description="Number of results to skip (irrelevant for single ID fetch).", include_in_schema=False),
+            sort: Optional[str] = Query(None, description="Sort field (irrelevant for single ID fetch).", include_in_schema=False)
         ):
-            """Get gene information by ID
-            
-            Args:
-                gene_id: Gene identifier (Entrez or Ensembl ID)
-                fields: Comma-separated list of fields to return
-                species: Species filter (e.g. "9606" for human)
-                email: User email for tracking usage
-                as_dataframe: Return results as pandas DataFrame
-                df_index: Index DataFrame by query (only if as_dataframe=True)
-                size: Maximum number of results to return (max 1000)
-                skip: Number of results to skip (for pagination)
-                sort: Sort field, prefix with '-' for descending order
-            """
+            """Get gene information by ID"""
             with start_action(action_type="api:get_gene", gene_id=str(gene_id), fields=str(fields), species=str(species), email=str(email), as_dataframe=as_dataframe, df_index=df_index, size=size, skip=skip, sort=str(sort)):
                 async with GeneClientAsync() as client:
                     return await client.getgene(
@@ -401,25 +384,27 @@ class GeneRoutesMixin:
             tags=["genes"],
             summary="Get information for multiple genes",
             description="""
-            Retrieves information for multiple genes in a single request.
+            Retrieves detailed information for **multiple specific genes** in a single request using their exact known identifiers.
             
-            This endpoint accepts a comma-separated list of gene IDs (either Entrez or Ensembl IDs).
+            **IMPORTANT:** **This is the preferred endpoint over `/gene/querymany` for fetching multiple specific genes when you already know their standard IDs (Entrez, Ensembl) and don't need complex search filters.** Provide IDs as a comma-separated string. It's generally faster for direct batch lookups.
+            If you need to perform batch *searches* for genes based on other criteria (like symbols across multiple species) or use different scopes per term, use `/gene/querymany`.
+
+            **Input Format:**
+            Accepts a comma-separated list of gene IDs (Entrez or Ensembl).
             
-            Examples:
-            - Multiple Entrez IDs: "1017,1018" (CDK2 and CDK3 genes)
-            - Multiple Ensembl IDs: "ENSG00000123374,ENSG00000134057" (CDK2 and CDK3 genes)
-            - Mixed IDs: "1017,ENSG00000134057" (CDK2 by Entrez and CDK3 by Ensembl)
+            **Endpoint Usage Examples:**
+            - Multiple Entrez IDs: `gene_ids=1017,1018`
+            - Multiple Ensembl IDs: `gene_ids=ENSG00000123374,ENSG00000134057`
+            - Mixed IDs: `gene_ids=1017,ENSG00000134057`
             
-            The response includes the same comprehensive gene information as the single gene endpoint,
-            but for all requested genes.
-            
-            You can filter the returned fields using the 'fields' parameter.
+            The response is a list containing an object for each **found** gene ID. IDs that are not found are silently omitted from the response list.
+            The order of results in the response list corresponds to the order of IDs in the input `gene_ids` string.
             """
         )
         async def get_genes(
             gene_ids: str = Query(
                 ...,
-                description="Comma-separated list of gene IDs",
+                description="Comma-separated list of gene IDs (Entrez or Ensembl).",
                 examples=[
                     "1017,1018",
                     "ENSG00000123374,ENSG00000134057",
@@ -428,31 +413,32 @@ class GeneRoutesMixin:
             ),
             fields: Optional[str] = Query(
                 None,
-                description="Comma-separated list of fields to return",
+                description="Comma-separated list of fields to return for each gene. Default: `symbol,name,taxid,entrezgene` (plus other core fields). Use `all` for everything.",
                 examples=[
-                    "symbol,name,refseq.rna",
-                    "id,symbol,name,taxid",
-                    "ensembl.gene,uniprot.Swiss-Prot"
+                    "symbol,name,taxid,entrezgene", # Default
+                    "symbol,name,summary",
+                    "refseq,uniprot",
+                    "all"
                 ]
             ),
             species: Optional[str] = Query(
                 None,
-                description="Species filter (e.g. '9606' for human)",
-                examples=["9606", "10090"]
+                description="Optional: Specify species (taxonomy ID or common name) to filter results.",
+                examples=["9606", "human", "10090"]
             ),
             email: Optional[str] = Query(
                 None,
-                description="User email for tracking usage",
+                description="Optional user email for usage tracking.",
                 examples=["user@example.com"]
             ),
             as_dataframe: bool = Query(
                 False,
-                description="Return results as pandas DataFrame",
+                description="Return results as a pandas DataFrame. Default: False.",
                 examples=[True, False]
             ),
             df_index: bool = Query(
                 True,
-                description="Index DataFrame by query (only if as_dataframe=True)",
+                description="When `as_dataframe=True`, index DataFrame by the gene ID (`_id`). Default: True.",
                 examples=[True, False]
             )
         ):
@@ -479,64 +465,80 @@ class VariantsRoutesMixin:
             tags=["variants"],
             summary="Query variants using a search string",
             description="""
-            Search for variants using a query string with various filtering options.
+            Search for variants using a query string with various filtering options, leveraging the MyVariant.info API.
+            See the [MyVariant.info Query Syntax Guide](https://docs.myvariant.info/en/latest/doc/variant_query_service.html#query-syntax) for full details.
             
-            This endpoint supports complex queries with the following features:
+            **IMPORTANT:** Use this endpoint for *searching* variants based on criteria. 
+            If you already know the exact variant ID (HGVS, rsID), use the `/variant/{variant_id}` endpoint for faster direct retrieval.
+
+            **Supported Query Features (Lucene syntax):**
             
-            1. Simple Queries:
-               - "rs58991260" - Find variant by rsID
-               - "chr1:69000-70000" - Find variants in genomic region
+            1. Simple Queries (searches default fields):
+               - `q=rs58991260` (Find by rsID)
             
-            2. Fielded Queries:
-               - "dbsnp.vartype:snp" - Find SNPs
-               - "dbnsfp.polyphen2.hdiv.pred:(D P)" - Find probably/possibly damaging variants
-               - "_exists_:dbsnp" - Find variants with dbSNP annotations
-               - "_missing_:exac" - Find variants without ExAC annotations
+            2. Fielded Queries (specify the field):
+               - `q=dbsnp.vartype:snp`
+               - `q=dbnsfp.polyphen2.hdiv.pred:(D P)` (Matches D or P - space implies OR within parens for the same field)
+               - `q=_exists_:dbsnp` (Variant must have a `dbsnp` field)
+               - `q=_missing_:exac` (Variant must NOT have an `exac` field)
+               - See [available fields](https://docs.myvariant.info/en/latest/doc/data.html#available-fields).
             
             3. Range Queries:
-               - "dbnsfp.polyphen2.hdiv.score:>0.99" - Find high-risk variants
-               - "exac.af:<0.00001" - Find rare variants
-               - "exac.ac.ac_adj:[76640 TO 80000]" - Find variants in frequency range
+               - `q=dbnsfp.polyphen2.hdiv.score:>0.99`
+               - `q=exac.af:[0 TO 0.00001]` (Inclusive range)
+               - `q=exac.ac.ac_adj:{76640 TO 80000}` (Exclusive range)
             
             4. Wildcard Queries:
-               - "dbnsfp.genename:CDK?" - Find variants in CDK genes
-               - "dbnsfp.genename:CDK*" - Find variants in genes starting with CDK
+               - `q=dbnsfp.genename:CDK?` (Single character wildcard)
+               - `q=dbnsfp.genename:CDK*` (Multi-character wildcard)
+               - *Note: Wildcard cannot be the first character.* 
             
             5. Boolean Queries:
-               - "_exists_:dbsnp AND dbsnp.vartype:snp" - Find SNPs in dbSNP
-               - "dbsnp.vartype:snp OR dbsnp.vartype:indel" - Find SNPs or indels
-               - "_exists_:dbsnp AND NOT dbsnp.vartype:indel" - Find non-indel variants in dbSNP
-            
-            The response includes pagination information and can be returned as a pandas DataFrame.
+               - `q=_exists_:dbsnp AND dbsnp.vartype:snp`
+               - `q=dbsnp.vartype:snp OR dbsnp.vartype:indel`
+               - `q=_exists_:dbsnp AND NOT dbsnp.vartype:indel`
+               - `q=(pubchem.molecular_weight:>500 OR chebi.mass:>500) AND _exists_:drugbank` (Grouping)
+
+            6. Genomic Interval Queries (can be combined with AND, not within parentheses):
+               - `q=chr1:69000-70000`
+               - `q=chr1:69000-70000 AND dbnsfp.polyphen2.hdiv.score:>0.9`
+
+            The response includes pagination information (`total`, `max_score`, `took`) and the list of matching `hits`.
             """
         )
         async def query_variants(
             q: str = Query(
                 ...,
-                description="Query string",
+                description="Query string following Lucene syntax. See endpoint description and MyVariant.info docs for details.",
                 examples=[
-                    "rs58991260",
-                    "dbsnp.vartype:snp",
-                    "dbnsfp.polyphen2.hdiv.score:>0.99",
-                    "dbnsfp.genename:CDK*",
-                    "_exists_:dbsnp AND dbsnp.vartype:snp"
+                    "rs58991260", # Simple query by rsID
+                    "chr1:69000-70000", # Genomic range
+                    "dbsnp.vartype:snp", # Fielded query
+                    "dbnsfp.polyphen2.hdiv.pred:(D P)", # Fielded query with multiple values
+                    "_exists_:dbsnp", # Existence query
+                    "dbnsfp.polyphen2.hdiv.score:>0.99", # Range query
+                    "dbnsfp.genename:CDK*", # Wildcard query
+                    "_exists_:dbsnp AND dbsnp.vartype:snp", # Boolean query
+                    "chr1:69000-70000 AND _exists_:clinvar" # Combined range and boolean
                 ]
             ),
             fields: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to return",
+                None, # Default is 'all' from client
+                description="Comma-separated list of fields to return. Supports dot notation (e.g., `dbnsfp.genename`) and wildcards (`chebi.*`). Default: `all`.",
                 examples=[
+                    "all", # Default
                     "cadd.phred,dbsnp.rsid",
-                    "clinvar.clinical_significance,cosmic.cosmic_id",
-                    "dbnsfp.sift_pred,dbnsfp.polyphen2_hdiv_pred"
+                    "clinvar.clinical_significance",
+                    "dbnsfp.sift_pred,dbnsfp.polyphen2_hdiv_pred",
+                    "dbnsfp.*"
                 ]
             ),
-            size: int = Query(10, description="Maximum number of results to return (max 1000)", examples=[10, 50, 100]),
-            skip: int = Query(0, description="Number of results to skip (for pagination)", examples=[0, 10, 20]),
-            sort: Optional[str] = Query(None, description="Sort field, prefix with '-' for descending order", examples=["_score", "-_score", "cadd.phred"]),
-            email: Optional[str] = Query(None, description="User email for tracking usage", examples=["user@example.com"]),
-            as_dataframe: bool = Query(False, description="Return results as pandas DataFrame", examples=[True, False]),
-            df_index: bool = Query(True, description="Index DataFrame by query (only if as_dataframe=True)", examples=[True, False])
+            size: int = Query(10, description="Maximum number of matching variant hits to return (capped at 1000). Default: 10.", examples=[10, 50, 1000]),
+            skip: int = Query(0, description="Number of matching variant hits to skip, starting from 0 (for pagination). Default: 0.", examples=[0, 10, 50]),
+            sort: Optional[str] = Query(None, description="Comma-separated fields to sort on. Prefix with `-` for descending order. Default: sort by relevance score (`_score`) descending.", examples=["_score", "-cadd.phred", "dbsnp.rsid"]),
+            email: Optional[str] = Query(None, description="Optional user email for usage tracking.", examples=["user@example.com"]),
+            as_dataframe: bool = Query(False, description="Return results as a pandas DataFrame. Default: False.", examples=[True, False]),
+            df_index: bool = Query(True, description="When `as_dataframe=True`, index DataFrame by `_id`. Default: True.", examples=[True, False])
         ):
             """Query variants"""
             with start_action(action_type="api:query_variants", q=str(q), fields=str(fields), size=size, skip=skip, sort=str(sort), email=str(email), as_dataframe=as_dataframe, df_index=df_index):
@@ -572,57 +574,59 @@ class VariantsRoutesMixin:
             tags=["variants"],
             summary="Batch query variants",
             description="""
-            Perform multiple variant queries in a single request.
+            Perform multiple variant queries in a single request using a comma-separated list of variant identifiers.
+            This endpoint is similar to the POST batch query functionality in the [MyVariant.info API](https://docs.myvariant.info/en/latest/doc/variant_query_service.html#batch-queries-via-post).
             
-            This endpoint is useful for batch processing of variant queries. It supports:
+            **IMPORTANT:** This endpoint takes multiple **terms** (like rsIDs, HGVS IDs) in `query_list` and searches for them within the specified `scopes`.
+            Use this for batch *searching* or retrieval based on specific identifiers within defined fields.
+            If you know the exact IDs and want direct retrieval (which is generally faster), use the `/variants` endpoint.
             
-            1. Multiple Query Types:
-               - rsID queries: ["rs58991260", "rs12345678"]
-               - HGVS queries: ["chr7:g.140453134T>C", "chr1:g.69000A>G"]
-               - Mixed queries: ["rs58991260", "chr7:g.140453134T>C"]
+            **Endpoint Usage:**
+            - Query multiple rsIDs: `query_list=rs58991260,rs2500` with `scopes=dbsnp.rsid`
+            - Query multiple HGVS IDs: `query_list=chr7:g.140453134T>C,chr1:g.69511A>G` (scopes likely not needed if IDs are unique, but `_id` or default scopes can be used)
+            - Query mixed IDs: `query_list=rs58991260,chr1:g.69511A>G` with `scopes=dbsnp.rsid,_id`
             
-            2. Field Scoping:
-               - Search in specific fields: scopes=["dbsnp.vartype", "dbnsfp.genename"]
-               - Search in all fields: scopes=None
-            
-            3. Result Filtering:
-               - Return specific fields: fields=["cadd.phred", "dbsnp.rsid"]
-               - Return all fields: fields=None
-            
-            The response can be returned as a pandas DataFrame for easier data manipulation.
+            **Result Interpretation:**
+            - The response is a list of matching variant objects.
+            - Each object includes a `query` field indicating which term from the `query_list` it matched.
+            - A single term might match multiple variants if the scope is broad (e.g., searching a gene name in `dbnsfp.genename`).
+            - Terms with no matches are **omitted** from the response list (unlike the MyVariant POST endpoint which returns a `notfound` entry).
             """
         )
         async def query_many_variants(
             query_list: str = Query(
                 ...,
-                description="Comma-separated list of query strings",
+                description="Comma-separated list of query terms (e.g., rsIDs, HGVS IDs). Do NOT use complex Lucene queries here; use `/variant/query` for that.",
                 examples=[
-                    "rs58991260,rs12345678",
-                    "chr7:g.140453134T>C,chr1:g.69000A>G",
-                    "rs58991260,chr7:g.140453134T>C"
+                    "rs58991260,rs12190874", # rsIDs
+                    "chr7:g.140453134T>C,chr1:g.69511A>G", # HGVS IDs
+                    "rs58991260,chr1:g.69511A>G" # Mixed
                 ]
             ),
             scopes: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to search in",
+                None, # Default scopes depend on the underlying client
+                description="Comma-separated list of fields to search the terms in `query_list` against. If omitted, default scopes of the client are used (often includes `_id`, `dbsnp.rsid`, etc.).",
                 examples=[
-                    "dbsnp.vartype,dbnsfp.genename",
-                    "clinvar.clinical_significance,cosmic.cosmic_id",
-                    "dbnsfp.sift_pred,dbnsfp.polyphen2_hdiv_pred"
+                    "dbsnp.rsid",
+                    "_id", # For HGVS IDs
+                    "clinvar.hgvs.coding,clinvar.hgvs.genomic",
+                    "dbsnp.rsid,_id"
                 ]
             ),
             fields: Optional[str] = Query(
                 None,
-                description="Comma-separated list of fields to return",
+                description="Comma-separated list of fields to return. Supports dot notation and wildcards. If `all` or omitted, all fields may be returned (client default).",
                 examples=[
                     "cadd.phred,dbsnp.rsid",
-                    "clinvar.clinical_significance,cosmic.cosmic_id",
-                    "dbnsfp.sift_pred,dbnsfp.polyphen2_hdiv_pred"
+                    "clinvar.clinical_significance",
+                    "dbnsfp.sift_pred,dbnsfp.polyphen2_hdiv_pred",
+                    "dbnsfp.*",
+                    "all"
                 ]
             ),
-            email: Optional[str] = Query(None, description="User email for tracking usage", examples=["user@example.com"]),
-            as_dataframe: bool = Query(False, description="Return results as pandas DataFrame", examples=[True, False]),
-            df_index: bool = Query(True, description="Index DataFrame by query (only if as_dataframe=True)", examples=[True, False])
+            email: Optional[str] = Query(None, description="Optional user email for usage tracking.", examples=["user@example.com"]),
+            as_dataframe: bool = Query(False, description="Return results as a pandas DataFrame. Default: False.", examples=[True, False]),
+            df_index: bool = Query(True, description="When `as_dataframe=True`, index DataFrame by the matched `query` term. Default: True.", examples=[True, False])
         ):
             """Batch query variants"""
             with start_action(action_type="api:query_many_variants", query_list=str(query_list), scopes=str(scopes), fields=str(fields), email=str(email), as_dataframe=as_dataframe, df_index=df_index):
@@ -643,53 +647,46 @@ class VariantsRoutesMixin:
             tags=["variants"],
             summary="Get variant information by ID",
             description="""
-            Retrieves detailed information about a specific variant using its identifier.
+            Retrieves detailed annotation data for a **single, specific variant** using its identifier, powered by the MyVariant.info annotation service.
+            See the [MyVariant.info Annotation Service Docs](https://docs.myvariant.info/en/latest/doc/variant_annotation_service.html).
             
-            This endpoint supports various variant ID formats:
-            - HGVS notation: "chr7:g.140453134T>C"
-            - dbSNP rsID: "rs58991260"
-            - Genomic coordinates: "chr1:69000-70000"
+            **IMPORTANT:** **This is the preferred endpoint over `/variant/query` for fetching a specific variant when you already know its standard ID (HGVS or rsID) and don't need complex search filters.** It provides direct, generally faster, access to the full annotation object.
+            If you need to *search* for variants based on other criteria (like gene name, functional impact, genomic region) or use complex boolean/range queries, use `/variant/query`.
             
-            The response includes comprehensive variant information such as:
-            - Basic information (ID, chromosome, position)
-            - VCF information (reference, alternative, quality)
-            - Genomic location (start, end, strand)
-            - CADD scores and predictions
-            - ClinVar annotations
-            - COSMIC annotations
-            - dbNSFP functional predictions
-            - dbSNP annotations
-            - DoCM annotations
-            - MutDB annotations
-            - SnpEff annotations
+            **Supported Identifiers (passed in the URL path):**
+            - HGVS ID (e.g., `chr7:g.140453134T>C`). *Note: MyVariant.info primarily uses hg19-based HGVS IDs.* 
+            - dbSNP rsID (e.g., `rs58991260`).
             
-            You can filter the returned fields using the 'fields' parameter.
+            The response includes comprehensive variant annotation information. By default (`fields=all` or omitted), the complete annotation object is returned.
+            If the ID is not found or invalid, a 404 error is returned.
             """
         )
         async def get_variant(
-            variant_id: str = Path(..., description="Variant identifier", examples=["chr7:g.140453134T>C", "rs58991260", "chr1:69000-70000"]),
+            variant_id: str = Path(..., description="Variant identifier (HGVS ID or dbSNP rsID)", examples=["chr7:g.140453134T>C", "rs58991260"]),
             fields: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to return",
+                None, # Default is effectively 'all' via the client
+                description="Comma-separated list of fields to filter the returned annotation object. Supports dot notation (e.g., `cadd.gene`) and wildcards (`dbnsfp.*`). Default: `all` (returns the full object).",
                 examples=[
+                    "all", # Default
                     "cadd.phred,dbsnp.rsid",
-                    "clinvar.clinical_significance,cosmic.cosmic_id",
-                    "dbnsfp.sift_pred,dbnsfp.polyphen2_hdiv_pred"
+                    "clinvar.clinical_significance",
+                    "dbnsfp.sift_pred,dbnsfp.polyphen2_hdiv_pred",
+                    "dbnsfp.*" 
                 ]
             ),
             email: Optional[str] = Query(
                 None,
-                description="User email for tracking usage",
+                description="Optional user email for usage tracking.",
                 examples=["user@example.com"]
             ),
             as_dataframe: bool = Query(
                 False,
-                description="Return results as pandas DataFrame",
+                description="Return result as a pandas DataFrame. Default: False.",
                 examples=[True, False]
             ),
             df_index: bool = Query(
                 True,
-                description="Index DataFrame by query (only if as_dataframe=True)",
+                description="When `as_dataframe=True`, index DataFrame by `_id`. Default: True.",
                 examples=[True, False]
             )
         ):
@@ -710,51 +707,59 @@ class VariantsRoutesMixin:
             tags=["variants"],
             summary="Get information for multiple variants",
             description="""
-            Retrieves information for multiple variants in a single request.
+            Retrieves annotation data for **multiple specific variants** in a single request using their identifiers, similar to the MyVariant.info batch annotation service.
+            See the [MyVariant.info Annotation Service Docs](https://docs.myvariant.info/en/latest/doc/variant_annotation_service.html#batch-queries-via-post).
             
-            This endpoint accepts a comma-separated list of variant IDs in various formats:
-            - HGVS notations: "chr7:g.140453134T>C,chr1:g.69000A>G"
-            - dbSNP rsIDs: "rs58991260,rs12345678"
-            - Mixed formats: "chr7:g.140453134T>C,rs58991260"
+            **IMPORTANT:** **This is the preferred endpoint over `/variants/querymany` for fetching multiple specific variants when you already know their standard IDs (HGVS or rsID).** Provide IDs as a comma-separated string. It's generally faster for direct batch lookups.
+            If you need to perform batch *searches* for variants based on other criteria or use different scopes per term, use `/variants/querymany`.
+
+            **Input Format:**
+            Accepts a comma-separated list of variant IDs (HGVS or dbSNP rsIDs) in the `variant_ids` query parameter (max 1000 IDs).
             
-            The response includes the same comprehensive variant information as the single variant endpoint,
-            but for all requested variants.
+            **Endpoint Usage Examples:**
+            - Multiple HGVS IDs: `variant_ids=chr7:g.140453134T>C,chr1:g.69511A>G`
+            - Multiple rsIDs: `variant_ids=rs58991260,rs2500`
+            - Mixed IDs: `variant_ids=chr7:g.140453134T>C,rs58991260`
             
-            You can filter the returned fields using the 'fields' parameter.
+            The response is a list containing the full annotation object for each **found** variant ID. IDs that are not found or are invalid are silently omitted from the response list.
+            Each returned object includes a `query` field indicating the input ID it corresponds to.
+            The order of results generally corresponds to the input order but may vary for mixed ID types or invalid IDs.
             """
         )
         async def get_variants(
             variant_ids: str = Query(
                 ...,
-                description="Comma-separated list of variant IDs",
+                description="Comma-separated list of variant IDs (HGVS or dbSNP rsIDs, max 1000).",
                 examples=[
-                    "chr7:g.140453134T>C,chr1:g.69000A>G",
-                    "rs58991260,rs12345678",
+                    "chr7:g.140453134T>C,chr1:g.69511A>G",
+                    "rs58991260,rs2500",
                     "chr7:g.140453134T>C,rs58991260"
                 ]
             ),
             fields: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to return",
+                None, # Default is effectively 'all' via the client
+                description="Comma-separated list of fields to filter the returned annotation objects. Supports dot notation and wildcards. Default: `all` (returns full objects).",
                 examples=[
+                    "all", # Default
                     "cadd.phred,dbsnp.rsid",
-                    "clinvar.clinical_significance,cosmic.cosmic_id",
-                    "dbnsfp.sift_pred,dbnsfp.polyphen2_hdiv_pred"
+                    "clinvar.clinical_significance",
+                    "dbnsfp.sift_pred,dbnsfp.polyphen2_hdiv_pred",
+                    "dbnsfp.*"
                 ]
             ),
             email: Optional[str] = Query(
                 None,
-                description="User email for tracking usage",
+                description="Optional user email for usage tracking.",
                 examples=["user@example.com"]
             ),
             as_dataframe: bool = Query(
                 False,
-                description="Return results as pandas DataFrame",
+                description="Return results as a pandas DataFrame. Default: False.",
                 examples=[True, False]
             ),
             df_index: bool = Query(
                 True,
-                description="Index DataFrame by query (only if as_dataframe=True)",
+                description="When `as_dataframe=True`, index DataFrame by the variant ID (`_id`). Default: True.",
                 examples=[True, False]
             )
         ):

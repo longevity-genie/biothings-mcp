@@ -52,7 +52,7 @@ uv sync
 ### Running the MCP Server
 
 ```bash
-# Start the MCP server
+# Start the MCP server locally
 uv run server
 ```
 
@@ -91,40 +91,20 @@ A publicly hosted version of this server is also available at `https://biothings
 
 ### Integration with AI Systems
 
-Configure your AI system to use the MCP server in one of two ways:
+To integrate this server with your MCP-compatible AI client, you can use one of the preconfigured JSON files provided in this repository:
 
-1. Direct SSE Connection:
-```json
-{
-  "mcpServers": {
-    "biothings-mcp": {
-      "url": "http://localhost:3001/mcp"
-    }
-  }
-}
-```
+*   **For connecting to a locally running server:** Use `mcp-config.json`. Ensure the server is running first, either via `uv run server` (see [Running the MCP Server](#running-the-mcp-server)) or `docker-compose up` (see [Docker Deployment](#docker-deployment)).
+*   **For connecting to the publicly hosted server:** Use `mcp-config-remote.json`. This connects to `https://biothings.longevity-genie.info/mcp` and doesn't require you to run anything locally.
 
-2. Using mcp-remote (recommended for OAuth support):
-```json
-{
-  "mcpServers": {
-    "biothings-mcp": {
-      "command": "npx",
-      "args": [
-        "mcp-remote",
-        "http://localhost:3001/mcp",
-        "6277"  // Optional port number for OAuth support
-      ]
-    }
-  }
-}
-```
-
-You can easily integrate this MCP server with any MCP-compatible client (like Cursor, Windsurv, ClaudeDesktop, etc.). Simply add the server configuration to your client's `mcp-config.json` (or equivalent) file, using either the direct connection or `mcp-remote` method shown above. If running locally using `docker-compose up`, the server address will typically be `http://localhost:3001/mcp`.
+Simply point your AI client (like Cursor, Windserve, ClaudeDesktop, VS Code with Copilot, or [others](https://github.com/punkpeye/awesome-mcp-clients)) to use the appropriate configuration file.
 
 Here's an example of how the tools might appear in an MCP client like Cursor after configuration:
 
 ![Cursor Usage Example](images/cursor_usage_example.jpg)
+
+## KNOWN ISSUES
+
+The library is alpha-quality. The major problem right now is that LLM-s are often stupid and do not know how to put valid gene and gene variant symbols. We plan to mitigrate it by extending comments and providing additional method for entetity resolution.
 
 ## Testing & Verification
 
