@@ -19,6 +19,12 @@ class QueryResponse(BaseModel):
     max_score: Optional[float] = None
     took: Optional[int] = None
 
+class VariantQueryResponse(BaseModel):
+    hits: List[VariantResponse]
+    total: Optional[int] = None
+    max_score: Optional[float] = None
+    took: Optional[int] = None
+
 class MetadataResponse(BaseModel):
     stats: Dict[str, Any]
     fields: Optional[Dict[str, Any]] = None
@@ -451,6 +457,172 @@ class GeneRoutesMixin:
 class VariantsRoutesMixin:
     def _variants_routes_config(self):
         """Configure variants routes for the API"""
+
+        # Define query routes BEFORE specific ID routes to avoid path conflicts
+        @self.get(
+            "/variant/query",
+            response_model=VariantQueryResponse,
+            tags=["variants"],
+            summary="Query variants using a search string",
+            description="""
+            Search for variants using a query string with various filtering options.
+            
+            This endpoint supports complex queries with the following features:
+            
+            1. Simple Queries:
+               - "rs58991260" - Find variant by rsID
+               - "chr1:69000-70000" - Find variants in genomic region
+            
+            2. Fielded Queries:
+               - "dbsnp.vartype:snp" - Find SNPs
+               - "dbnsfp.polyphen2.hdiv.pred:(D P)" - Find probably/possibly damaging variants
+               - "_exists_:dbsnp" - Find variants with dbSNP annotations
+               - "_missing_:exac" - Find variants without ExAC annotations
+            
+            3. Range Queries:
+               - "dbnsfp.polyphen2.hdiv.score:>0.99" - Find high-risk variants
+               - "exac.af:<0.00001" - Find rare variants
+               - "exac.ac.ac_adj:[76640 TO 80000]" - Find variants in frequency range
+            
+            4. Wildcard Queries:
+               - "dbnsfp.genename:CDK?" - Find variants in CDK genes
+               - "dbnsfp.genename:CDK*" - Find variants in genes starting with CDK
+            
+            5. Boolean Queries:
+               - "_exists_:dbsnp AND dbsnp.vartype:snp" - Find SNPs in dbSNP
+               - "dbsnp.vartype:snp OR dbsnp.vartype:indel" - Find SNPs or indels
+               - "_exists_:dbsnp AND NOT dbsnp.vartype:indel" - Find non-indel variants in dbSNP
+            
+            The response includes pagination information and can be returned as a pandas DataFrame.
+            """
+        )
+        async def query_variants(
+            q: str = Query(
+                ...,
+                description="Query string",
+                examples=[
+                    "rs58991260",
+                    "dbsnp.vartype:snp",
+                    "dbnsfp.polyphen2.hdiv.score:>0.99",
+                    "dbnsfp.genename:CDK*",
+                    "_exists_:dbsnp AND dbsnp.vartype:snp"
+                ]
+            ),
+            fields: Optional[str] = Query(
+                None,
+                description="Comma-separated list of fields to return",
+                examples=[
+                    "cadd.phred,dbsnp.rsid",
+                    "clinvar.clinical_significance,cosmic.cosmic_id",
+                    "dbnsfp.sift_pred,dbnsfp.polyphen2_hdiv_pred"
+                ]
+            ),
+            size: int = Query(10, description="Maximum number of results to return (max 1000)", examples=[10, 50, 100]),
+            skip: int = Query(0, description="Number of results to skip (for pagination)", examples=[0, 10, 20]),
+            sort: Optional[str] = Query(None, description="Sort field, prefix with '-' for descending order", examples=["_score", "-_score", "cadd.phred"]),
+            email: Optional[str] = Query(None, description="User email for tracking usage", examples=["user@example.com"]),
+            as_dataframe: bool = Query(False, description="Return results as pandas DataFrame", examples=[True, False]),
+            df_index: bool = Query(True, description="Index DataFrame by query (only if as_dataframe=True)", examples=[True, False])
+        ):
+            """Query variants"""
+            with start_action(action_type="api:query_variants", q=str(q), fields=str(fields), size=size, skip=skip, sort=str(sort), email=str(email), as_dataframe=as_dataframe, df_index=df_index):
+                async with VariantClientAsync() as client:
+                    result = await client.query(
+                        q,
+                        fields=fields.split(",") if fields else None,
+                        size=size,
+                        skip=skip,
+                        sort=sort,
+                        email=email,
+                        as_dataframe=as_dataframe,
+                        df_index=df_index
+                    )
+                    validated_hits = []
+                    if isinstance(result, dict) and "hits" in result and isinstance(result["hits"], list):
+                        for hit in result["hits"]:
+                            try:
+                                validated_hits.append(VariantResponse.model_validate(hit))
+                            except Exception as e:
+                                log_message(message_type="warning:query_variants:hit_validation_error", error=str(e), hit=repr(hit))
+                                pass 
+                    
+                    return VariantQueryResponse(
+                        hits=validated_hits,
+                        total=result.get("total") if isinstance(result, dict) else None,
+                        max_score=result.get("max_score") if isinstance(result, dict) else None,
+                        took=result.get("took") if isinstance(result, dict) else None,
+                    )
+
+        @self.get(
+            "/variants/querymany",
+            tags=["variants"],
+            summary="Batch query variants",
+            description="""
+            Perform multiple variant queries in a single request.
+            
+            This endpoint is useful for batch processing of variant queries. It supports:
+            
+            1. Multiple Query Types:
+               - rsID queries: ["rs58991260", "rs12345678"]
+               - HGVS queries: ["chr7:g.140453134T>C", "chr1:g.69000A>G"]
+               - Mixed queries: ["rs58991260", "chr7:g.140453134T>C"]
+            
+            2. Field Scoping:
+               - Search in specific fields: scopes=["dbsnp.vartype", "dbnsfp.genename"]
+               - Search in all fields: scopes=None
+            
+            3. Result Filtering:
+               - Return specific fields: fields=["cadd.phred", "dbsnp.rsid"]
+               - Return all fields: fields=None
+            
+            The response can be returned as a pandas DataFrame for easier data manipulation.
+            """
+        )
+        async def query_many_variants(
+            query_list: str = Query(
+                ...,
+                description="Comma-separated list of query strings",
+                examples=[
+                    "rs58991260,rs12345678",
+                    "chr7:g.140453134T>C,chr1:g.69000A>G",
+                    "rs58991260,chr7:g.140453134T>C"
+                ]
+            ),
+            scopes: Optional[str] = Query(
+                None,
+                description="Comma-separated list of fields to search in",
+                examples=[
+                    "dbsnp.vartype,dbnsfp.genename",
+                    "clinvar.clinical_significance,cosmic.cosmic_id",
+                    "dbnsfp.sift_pred,dbnsfp.polyphen2_hdiv_pred"
+                ]
+            ),
+            fields: Optional[str] = Query(
+                None,
+                description="Comma-separated list of fields to return",
+                examples=[
+                    "cadd.phred,dbsnp.rsid",
+                    "clinvar.clinical_significance,cosmic.cosmic_id",
+                    "dbnsfp.sift_pred,dbnsfp.polyphen2_hdiv_pred"
+                ]
+            ),
+            email: Optional[str] = Query(None, description="User email for tracking usage", examples=["user@example.com"]),
+            as_dataframe: bool = Query(False, description="Return results as pandas DataFrame", examples=[True, False]),
+            df_index: bool = Query(True, description="Index DataFrame by query (only if as_dataframe=True)", examples=[True, False])
+        ):
+            """Batch query variants"""
+            with start_action(action_type="api:query_many_variants", query_list=str(query_list), scopes=str(scopes), fields=str(fields), email=str(email), as_dataframe=as_dataframe, df_index=df_index):
+                async with VariantClientAsync() as client:
+                    return await client.querymany(
+                        query_list.split(","),
+                        scopes=scopes.split(",") if scopes else None,
+                        fields=fields.split(",") if fields else None,
+                        email=email,
+                        as_dataframe=as_dataframe,
+                        df_index=df_index
+                    )
+            
+        # Define specific ID routes AFTER query routes
         @self.get(
             "/variant/{variant_id}",
             response_model=VariantResponse,
@@ -583,153 +755,6 @@ class VariantsRoutesMixin:
                         df_index=df_index
                     )
 
-        @self.get(
-            "/variant/query",
-            tags=["variants"],
-            summary="Query variants using a search string",
-            description="""
-            Search for variants using a query string with various filtering options.
-            
-            This endpoint supports complex queries with the following features:
-            
-            1. Simple Queries:
-               - "rs58991260" - Find variant by rsID
-               - "chr1:69000-70000" - Find variants in genomic region
-            
-            2. Fielded Queries:
-               - "dbsnp.vartype:snp" - Find SNPs
-               - "dbnsfp.polyphen2.hdiv.pred:(D P)" - Find probably/possibly damaging variants
-               - "_exists_:dbsnp" - Find variants with dbSNP annotations
-               - "_missing_:exac" - Find variants without ExAC annotations
-            
-            3. Range Queries:
-               - "dbnsfp.polyphen2.hdiv.score:>0.99" - Find high-risk variants
-               - "exac.af:<0.00001" - Find rare variants
-               - "exac.ac.ac_adj:[76640 TO 80000]" - Find variants in frequency range
-            
-            4. Wildcard Queries:
-               - "dbnsfp.genename:CDK?" - Find variants in CDK genes
-               - "dbnsfp.genename:CDK*" - Find variants in genes starting with CDK
-            
-            5. Boolean Queries:
-               - "_exists_:dbsnp AND dbsnp.vartype:snp" - Find SNPs in dbSNP
-               - "dbsnp.vartype:snp OR dbsnp.vartype:indel" - Find SNPs or indels
-               - "_exists_:dbsnp AND NOT dbsnp.vartype:indel" - Find non-indel variants in dbSNP
-            
-            The response includes pagination information and can be returned as a pandas DataFrame.
-            """
-        )
-        async def query_variants(
-            q: str = Query(
-                ...,
-                description="Query string",
-                examples=[
-                    "rs58991260",
-                    "dbsnp.vartype:snp",
-                    "dbnsfp.polyphen2.hdiv.score:>0.99",
-                    "dbnsfp.genename:CDK*",
-                    "_exists_:dbsnp AND dbsnp.vartype:snp"
-                ]
-            ),
-            fields: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to return",
-                examples=[
-                    "cadd.phred,dbsnp.rsid",
-                    "clinvar.clinical_significance,cosmic.cosmic_id",
-                    "dbnsfp.sift_pred,dbnsfp.polyphen2_hdiv_pred"
-                ]
-            ),
-            size: int = Query(10, description="Maximum number of results to return (max 1000)", examples=[10, 50, 100]),
-            skip: int = Query(0, description="Number of results to skip (for pagination)", examples=[0, 10, 20]),
-            sort: Optional[str] = Query(None, description="Sort field, prefix with '-' for descending order", examples=["_score", "-_score", "cadd.phred"]),
-            email: Optional[str] = Query(None, description="User email for tracking usage", examples=["user@example.com"]),
-            as_dataframe: bool = Query(False, description="Return results as pandas DataFrame", examples=[True, False]),
-            df_index: bool = Query(True, description="Index DataFrame by query (only if as_dataframe=True)", examples=[True, False])
-        ):
-            """Query variants"""
-            with start_action(action_type="api:query_variants", q=str(q), fields=str(fields), size=size, skip=skip, sort=str(sort), email=str(email), as_dataframe=as_dataframe, df_index=df_index):
-                async with VariantClientAsync() as client:
-                    return await client.query(
-                        q,
-                        fields=fields.split(",") if fields else None,
-                        size=size,
-                        skip=skip,
-                        sort=sort,
-                        email=email,
-                        as_dataframe=as_dataframe,
-                        df_index=df_index
-                    )
-
-        @self.get(
-            "/variants/querymany",
-            tags=["variants"],
-            summary="Batch query variants",
-            description="""
-            Perform multiple variant queries in a single request.
-            
-            This endpoint is useful for batch processing of variant queries. It supports:
-            
-            1. Multiple Query Types:
-               - rsID queries: ["rs58991260", "rs12345678"]
-               - HGVS queries: ["chr7:g.140453134T>C", "chr1:g.69000A>G"]
-               - Mixed queries: ["rs58991260", "chr7:g.140453134T>C"]
-            
-            2. Field Scoping:
-               - Search in specific fields: scopes=["dbsnp.vartype", "dbnsfp.genename"]
-               - Search in all fields: scopes=None
-            
-            3. Result Filtering:
-               - Return specific fields: fields=["cadd.phred", "dbsnp.rsid"]
-               - Return all fields: fields=None
-            
-            The response can be returned as a pandas DataFrame for easier data manipulation.
-            """
-        )
-        async def query_many_variants(
-            query_list: str = Query(
-                ...,
-                description="Comma-separated list of query strings",
-                examples=[
-                    "rs58991260,rs12345678",
-                    "chr7:g.140453134T>C,chr1:g.69000A>G",
-                    "rs58991260,chr7:g.140453134T>C"
-                ]
-            ),
-            scopes: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to search in",
-                examples=[
-                    "dbsnp.vartype,dbnsfp.genename",
-                    "clinvar.clinical_significance,cosmic.cosmic_id",
-                    "dbnsfp.sift_pred,dbnsfp.polyphen2_hdiv_pred"
-                ]
-            ),
-            fields: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to return",
-                examples=[
-                    "cadd.phred,dbsnp.rsid",
-                    "clinvar.clinical_significance,cosmic.cosmic_id",
-                    "dbnsfp.sift_pred,dbnsfp.polyphen2_hdiv_pred"
-                ]
-            ),
-            email: Optional[str] = Query(None, description="User email for tracking usage", examples=["user@example.com"]),
-            as_dataframe: bool = Query(False, description="Return results as pandas DataFrame", examples=[True, False]),
-            df_index: bool = Query(True, description="Index DataFrame by query (only if as_dataframe=True)", examples=[True, False])
-        ):
-            """Batch query variants"""
-            with start_action(action_type="api:query_many_variants", query_list=str(query_list), scopes=str(scopes), fields=str(fields), email=str(email), as_dataframe=as_dataframe, df_index=df_index):
-                async with VariantClientAsync() as client:
-                    return await client.querymany(
-                        query_list.split(","),
-                        scopes=scopes.split(",") if scopes else None,
-                        fields=fields.split(",") if fields else None,
-                        email=email,
-                        as_dataframe=as_dataframe,
-                        df_index=df_index
-                    )
-            
 class ChemRoutesMixin:
     def _chem_routes_config(self):
         """Configure chemical routes for the API"""
