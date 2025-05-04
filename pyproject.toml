@@ -1,0 +1,28 @@
+[project]
+name = "biothings-mcp"
+version = "0.0.1"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "antonkulaga", email = "antonkulaga@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "biothings-typed-client>=0.0.2",
+    "eliot>=1.17.5",
+    "fastapi-mcp>=0.3.3",
+    "pycomfort>=0.0.18",
+]
+
+[project.scripts]
+server = "biothings_mcp.server:run_server"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.26.0",
+]

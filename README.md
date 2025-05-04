@@ -64,14 +64,30 @@ uv run server
 
 ### Integration with AI Systems
 
-Configure your AI system to use the MCP server:
+Configure your AI system to use the MCP server in one of two ways:
 
+1. Direct SSE Connection:
 ```json
 {
   "mcpServers": {
-    "biothings": {
-      "command": "biothings-mcp",
-      "args": ["run"]
+    "biothings-mcp": {
+      "url": "http://localhost:3001/mcp"
+    }
+  }
+}
+```
+
+2. Using mcp-remote (recommended for OAuth support):
+```json
+{
+  "mcpServers": {
+    "biothings-mcp": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "http://localhost:3001/mcp",
+        "8080"  // Optional port number for OAuth support
+      ]
     }
   }
 }
@@ -79,10 +95,15 @@ Configure your AI system to use the MCP server:
 
 ## Testing & Verification
 
+Run tests for the API endpoint:
+```bash
+uv run pytest -vvv -s
+```
+
 Test your MCP setup with the MCP Inspector:
 
 ```bash
-npx @modelcontextprotocol/inspector biothings-mcp run
+npx @modelcontextprotocol/inspector --config mcp-config.json --server biothings-mcp
 ```
 
 This opens a web interface where you can explore and test all available tools.
@@ -92,6 +113,7 @@ This opens a web interface where you can explore and test all available tools.
 For detailed documentation about the MCP protocol and its implementation, refer to:
 - [MCP Protocol Documentation](https://modelcontextprotocol.org)
 - [biothings-typed-client Documentation](https://github.com/longevity-genie/biothings-typed-client)
+- [FastAPI-MCP Documentation](https://github.com/tadata-org/fastapi_mcp)
 
 ## License
 
@@ -102,3 +124,4 @@ This project is licensed under the MIT License.
 - [BioThings](https://biothings.io/) for the original client library
 - [MCP Protocol](https://modelcontextprotocol.org) for the protocol specification
 - [Pydantic](https://pydantic-docs.helpmanual.io/) for the data validation framework
+- [FastAPI-MCP](https://github.com/tadata-org/fastapi_mcp) for the MCP server implementation
