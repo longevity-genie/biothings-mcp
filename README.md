@@ -118,6 +118,7 @@ Test your MCP setup with the MCP Inspector:
 ```bash
 npx @modelcontextprotocol/inspector --config mcp-config.json --server biothings-mcp
 ```
+After that you can explore its methods with MCP Inspector at http://127.0.0.1:6274
 
 *Note: Using the MCP Inspector is optional. Most MCP clients (like Cursor, Windsurv, etc.) will automatically display the available tools from this server once configured. However, the Inspector can be useful for detailed testing and exploration.* 
 

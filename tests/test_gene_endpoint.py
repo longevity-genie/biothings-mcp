@@ -154,4 +154,31 @@ def test_metadata_endpoint(client):
     assert "stats" in data
     assert isinstance(data["stats"], dict)
     assert "total" in data["stats"]
-    assert isinstance(data["stats"]["total"], int) 
+    assert isinstance(data["stats"]["total"], int)
+
+def test_get_gene_ensembl_id(client):
+    """Test the /gene/{gene_id} endpoint with an Ensembl ID.
+
+    This test verifies that the endpoint correctly retrieves gene information
+    using an Ensembl gene ID. It checks:
+    1. The response status code is 200 (success)
+    2. The response contains the correct gene ID (matches the queried Ensembl ID)
+    3. Placeholder assertions for symbol and name (values need verification).
+
+    The test uses the Ensembl ID ENSECAG00000002212 (likely from Cavia porcellus).
+    """
+    ensembl_id = "ENSECAG00000002212"
+    response = client.get(f"/gene/{ensembl_id}")
+    assert response.status_code == 200
+    data = response.json()
+    # Note: The actual ID field returned by MyGene.info for Ensembl might be different
+    # (e.g., it might resolve to an Entrez ID or keep the Ensembl ID in a specific field).
+    # We now check if the queried ensembl_id exists within the 'ensembl.gene' field.
+    assert "ensembl" in data
+    assert "gene" in data["ensembl"]
+    assert data["ensembl"]["gene"] == ensembl_id
+    # TODO: Verify the expected symbol and name for this Ensembl ID and adjust assertions.
+    # Check if standard fields are present, even if values aren't known
+    assert "symbol" in data
+    assert "name" in data
+    assert "taxid" in data 

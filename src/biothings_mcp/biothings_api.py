@@ -54,6 +54,7 @@ class GeneRoutesMixin:
             response_model=QueryResponse,
             tags=["genes"],
             summary="Query genes using a search string",
+            operation_id="query_genes",
             description="""
             Search for genes using a query string with various filtering options.
             
@@ -172,6 +173,7 @@ class GeneRoutesMixin:
             response_model=List[GeneResponse],
             tags=["genes"],
             summary="Batch query genes",
+            operation_id="query_many_genes",
             description="""
             Perform multiple gene searches in a single request using a comma-separated list of query terms.
             This endpoint essentially performs a batch query similar to the POST request described in the [MyGene.info documentation](https://docs.mygene.info/en/latest/doc/query_service.html#batch-queries-via-post).
@@ -272,6 +274,7 @@ class GeneRoutesMixin:
             response_model=MetadataResponse,
             tags=["genes"],
             summary="Get gene database metadata",
+            operation_id="get_gene_metadata",
             description="""
             Retrieve metadata about the underlying MyGene.info gene annotation database, **NOT** information about specific genes.
             
@@ -319,6 +322,7 @@ class GeneRoutesMixin:
             response_model=GeneResponse,
             tags=["genes"],
             summary="Get gene information by ID",
+            operation_id="get_gene",
             description="""
             Retrieves detailed information for a **single, specific gene** using its exact known identifier.
             
@@ -383,6 +387,7 @@ class GeneRoutesMixin:
             response_model=List[GeneResponse],
             tags=["genes"],
             summary="Get information for multiple genes",
+            operation_id="get_genes",
             description="""
             Retrieves detailed information for **multiple specific genes** in a single request using their exact known identifiers.
             
@@ -464,6 +469,7 @@ class VariantsRoutesMixin:
             response_model=VariantQueryResponse,
             tags=["variants"],
             summary="Query variants using a search string",
+            operation_id="query_variants",
             description="""
             Search for variants using a query string with various filtering options, leveraging the MyVariant.info API.
             See the [MyVariant.info Query Syntax Guide](https://docs.myvariant.info/en/latest/doc/variant_query_service.html#query-syntax) for full details.
@@ -573,6 +579,7 @@ class VariantsRoutesMixin:
             "/variants/querymany",
             tags=["variants"],
             summary="Batch query variants",
+            operation_id="query_many_variants",
             description="""
             Perform multiple variant queries in a single request using a comma-separated list of variant identifiers.
             This endpoint is similar to the POST batch query functionality in the [MyVariant.info API](https://docs.myvariant.info/en/latest/doc/variant_query_service.html#batch-queries-via-post).
@@ -646,6 +653,7 @@ class VariantsRoutesMixin:
             response_model=VariantResponse,
             tags=["variants"],
             summary="Get variant information by ID",
+            operation_id="get_variant",
             description="""
             Retrieves detailed annotation data for a **single, specific variant** using its identifier, powered by the MyVariant.info annotation service.
             See the [MyVariant.info Annotation Service Docs](https://docs.myvariant.info/en/latest/doc/variant_annotation_service.html).
@@ -706,6 +714,7 @@ class VariantsRoutesMixin:
             response_model=List[VariantResponse],
             tags=["variants"],
             summary="Get information for multiple variants",
+            operation_id="get_variants",
             description="""
             Retrieves annotation data for **multiple specific variants** in a single request using their identifiers, similar to the MyVariant.info batch annotation service.
             See the [MyVariant.info Annotation Service Docs](https://docs.myvariant.info/en/latest/doc/variant_annotation_service.html#batch-queries-via-post).
@@ -784,6 +793,7 @@ class ChemRoutesMixin:
             response_model=ChemQueryResponse,
             tags=["chemicals"],
             summary="Query chemicals using a search string",
+            operation_id="query_chems",
             description="""
             Search for chemical compounds using a query string with various filtering options.
             
@@ -876,6 +886,7 @@ class ChemRoutesMixin:
             "/chems/querymany",
             tags=["chemicals"],
             summary="Batch query chemicals",
+            operation_id="query_many_chemicals",
             description="""
             Perform multiple chemical queries in a single request.
             
@@ -947,6 +958,7 @@ class ChemRoutesMixin:
             response_model=ChemResponse,
             tags=["chemicals"],
             summary="Get chemical information by ID",
+            operation_id="get_chem",
             description="""
             Retrieves detailed information about a specific chemical compound using its identifier.
             
@@ -1013,6 +1025,7 @@ class ChemRoutesMixin:
             response_model=List[ChemResponse],
             tags=["chemicals"],
             summary="Get information for multiple chemicals",
+            operation_id="get_chems",
             description="""
             Retrieves information for multiple chemical compounds in a single request.
             
@@ -1081,6 +1094,7 @@ class TaxonRoutesMixin:
             response_model=TaxonResponse,
             tags=["taxons"],
             summary="Get taxon information by ID",
+            operation_id="get_taxon",
             description="""
             Retrieves detailed information about a specific taxon using its identifier.
             
@@ -1153,6 +1167,7 @@ class TaxonRoutesMixin:
             response_model=List[TaxonResponse],
             tags=["taxons"],
             summary="Get information for multiple taxa",
+            operation_id="get_taxons",
             description="""
             Retrieves information for multiple taxa in a single request.
             
@@ -1219,6 +1234,7 @@ class TaxonRoutesMixin:
             response_model=TaxonQueryResponse,
             tags=["taxons"],
             summary="Query taxa using a search string",
+            operation_id="query_taxons",
             description="""
             Search for taxa using a query string with various filtering options.
             
@@ -1311,6 +1327,7 @@ class TaxonRoutesMixin:
             "/taxons/querymany",
             tags=["taxons"],
             summary="Batch query taxa",
+            operation_id="query_many_taxons",
             description="""
             Perform multiple taxon queries in a single request.
             

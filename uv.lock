@@ -63,7 +63,7 @@ caching = [
 
 [[package]]
 name = "biothings-mcp"
-version = "0.0.2"
+version = "0.0.4"
 source = { editable = "." }
 dependencies = [
     { name = "biothings-typed-client" },
@@ -80,7 +80,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "biothings-typed-client", specifier = ">=0.0.2" },
+    { name = "biothings-typed-client", specifier = ">=0.0.3" },
     { name = "eliot", specifier = ">=1.17.5" },
     { name = "fastapi-mcp", specifier = ">=0.3.3" },
     { name = "pycomfort", specifier = ">=0.0.18" },
@@ -94,7 +94,7 @@ dev = [
 
 [[package]]
 name = "biothings-typed-client"
-version = "0.0.2"
+version = "0.0.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "biothings-client", extra = ["caching"] },
@@ -102,9 +102,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyld" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/78/5c/4cb2e8fddf8770ea79b90aa82fece1cef11a8dde9205b6551fa782c18dad/biothings_typed_client-0.0.2.tar.gz", hash = "sha256:a6ff85cdcb0732938d0be8623f1b87708a79292ee0ecae0519d29cca29a212e1", size = 57862, upload_time = "2025-05-03T17:30:25.063Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9e/72/65794914b5a5dea6a83b72ce20acc84357075a5abbcac2edd22fcd0bb8de/biothings_typed_client-0.0.3.tar.gz", hash = "sha256:f8ccc22024d640c67950c32f4d8f3f0c57b835d3a2ba1df06dbbf0f0c10e312e", size = 58239, upload_time = "2025-05-04T07:40:06.952Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c4/8a/8579bfd44def731ba513f38bb8de59d0aba6ed8fbf809898e3419e984a77/biothings_typed_client-0.0.2-py3-none-any.whl", hash = "sha256:9982d61b5f70d33c8c32dc018b9702bdd085b5c4f0780da69284e68642af5463", size = 23756, upload_time = "2025-05-03T17:30:23.342Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/3c/f30a35979ce8b5d3c372c595014f34a94aec2dc17ba2983377f296875c13/biothings_typed_client-0.0.3-py3-none-any.whl", hash = "sha256:927d7d639b2ebe4815128964d9ac966e55ab278d8c4efaae3481eeaeb31827bd", size = 23900, upload_time = "2025-05-04T07:40:05.555Z" },
 ]
 
 [[package]]
