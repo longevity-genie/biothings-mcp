@@ -120,6 +120,12 @@ Configure your AI system to use the MCP server in one of two ways:
 }
 ```
 
+You can easily integrate this MCP server with any MCP-compatible client (like Cursor, Windsurv, ClaudeDesktop, etc.). Simply add the server configuration to your client's `mcp-config.json` (or equivalent) file, using either the direct connection or `mcp-remote` method shown above. If running locally using `docker-compose up`, the server address will typically be `http://localhost:3001/mcp`.
+
+Here's an example of how the tools might appear in an MCP client like Cursor after configuration:
+
+![Cursor Usage Example](images/cursor_usage_example.jpg)
+
 ## Testing & Verification
 
 Run tests for the API endpoint:
@@ -132,6 +138,10 @@ Test your MCP setup with the MCP Inspector:
 ```bash
 npx @modelcontextprotocol/inspector --config mcp-config.json --server biothings-mcp
 ```
+
+*Note: Using the MCP Inspector is optional. Most MCP clients (like Cursor, Windsurv, etc.) will automatically display the available tools from this server once configured. However, the Inspector can be useful for detailed testing and exploration.* 
+
+*If you choose to use the Inspector via `npx`, ensure you have Node.js and npm installed. Using [nvm](https://github.com/nvm-sh/nvm) (Node Version Manager) is recommended for managing Node.js versions.*
 
 This opens a web interface where you can explore and test all available tools.
 
