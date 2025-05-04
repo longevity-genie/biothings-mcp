@@ -124,7 +124,21 @@ This project is licensed under the MIT License.
 
 ## Acknowledgments
 
-- [BioThings](https://biothings.io/) for the original client library
+- [BioThings](https://biothings.io/) for the REST API and original [client library](https://github.com/biothings/biothings_client.py)
 - [MCP Protocol](https://modelcontextprotocol.org) for the protocol specification
 - [Pydantic](https://pydantic-docs.helpmanual.io/) for the data validation framework
 - [FastAPI-MCP](https://github.com/tadata-org/fastapi_mcp) for the MCP server implementation
+
+- This project is part of the [Longevity Genie](https://github.com/longevity-genie) organization, which develops open-source AI assistants and libraries for health, genetics, and longevity research.
+
+We are supported by:
+
+[![HEALES](images/heales.jpg)](https://heales.org/)
+
+*HEALES - Healthy Life Extension Society*
+
+and
+
+[![IBIMA](images/IBIMA.jpg)](https://ibima.med.uni-rostock.de/)
+
+[IBIMA - Institute for Biostatistics and Informatics in Medicine and Ageing Research](https://ibima.med.uni-rostock.de/)
