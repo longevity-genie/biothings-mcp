@@ -1,6 +1,6 @@
 [project]
 name = "biothings-mcp"
-version = "0.0.4"
+version = "0.0.5"
 description = "Add your description here"
 readme = "README.md"
 authors = [
@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
+    "biopython>=1.85",
     "biothings-typed-client>=0.0.3",
     "eliot>=1.17.5",
     "fastapi-mcp>=0.3.3",

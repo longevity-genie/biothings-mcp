@@ -1,17 +1,161 @@
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Union, Type, ClassVar
+from typing import Optional, List, Dict, Any, Union
 
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI, Header, Query, Path, HTTPException
-from fastapi.responses import StreamingResponse, RedirectResponse
+from fastapi import FastAPI, Query, Path as FastApiPath, HTTPException
+from fastapi.responses import RedirectResponse
 from biothings_typed_client.genes import GeneClientAsync, GeneResponse
 from biothings_typed_client.variants import VariantClientAsync, VariantResponse
 from biothings_typed_client.chem import ChemClientAsync, ChemResponse
 from biothings_typed_client.taxons import TaxonClientAsync, TaxonResponse
-from eliot import start_task, start_action, log_message
+from eliot import start_action
+
+# Request Body Models
+
+class GeneQueryRequest(BaseModel):
+    q: str = Field(..., description="Query string following Lucene syntax.")
+    fields: Optional[str] = Field(None, description="Comma-separated list of fields to return.")
+    size: int = Field(10, description="Maximum number of hits.")
+    skip: int = Field(0, description="Number of hits to skip.")
+    sort: Optional[str] = Field(None, description="Comma-separated fields to sort on.")
+    species: Optional[str] = Field(None, description="Filter by species.")
+    email: Optional[str] = Field(None, description="User email for tracking.")
+    as_dataframe: bool = Field(False, description="Return as DataFrame.")
+    df_index: bool = Field(True, description="Index DataFrame by _id.")
+
+class GeneQueryManyRequest(BaseModel):
+    query_list: str = Field(..., description="Comma-separated list of query terms.")
+    scopes: Optional[str] = Field("entrezgene,ensemblgene,retired", description="Comma-separated list of fields to search against.")
+    fields: Optional[str] = Field(None, description="Comma-separated list of fields to return.")
+    species: Optional[str] = Field(None, description="Filter by species.")
+    email: Optional[str] = Field(None, description="User email for tracking.")
+    as_dataframe: bool = Field(False, description="Return as DataFrame.")
+    df_index: bool = Field(True, description="Index DataFrame by matched query term.")
+    size: int = Field(10, description="Maximum number of hits per query term.")
+
+class GeneMetadataRequest(BaseModel):
+    # This endpoint typically doesn't require a body,
+    # but if it were to, it would be defined here.
+    # For now, let's assume it might take an optional email for consistency.
+    email: Optional[str] = Field(None, description="Optional user email for usage tracking.")
+    pass
+
+
+class GeneRequest(BaseModel):
+    fields: Optional[str] = Field(None, description="Comma-separated list of fields to return.")
+    species: Optional[str] = Field(None, description="Specify species.")
+    email: Optional[str] = Field(None, description="User email for tracking.")
+    as_dataframe: bool = Field(False, description="Return as DataFrame.", include_in_schema=False) # Kept from original, though less common for single GETs
+    df_index: bool = Field(True, description="Index DataFrame by _id.", include_in_schema=False)
+    # size, skip, sort are usually not applicable for single ID fetch but were in original Query params
+    size: int = Field(10, description="Max results (less relevant).", include_in_schema=False)
+    skip: int = Field(0, description="Skip results (less relevant).", include_in_schema=False)
+    sort: Optional[str] = Field(None, description="Sort field (less relevant).", include_in_schema=False)
+
+
+class GenesRequest(BaseModel):
+    gene_ids: str = Field(..., description="Comma-separated list of gene IDs.")
+    fields: Optional[str] = Field(None, description="Comma-separated list of fields to return.")
+    species: Optional[str] = Field(None, description="Filter by species.")
+    email: Optional[str] = Field(None, description="User email for tracking.")
+    as_dataframe: bool = Field(False, description="Return as DataFrame.")
+    df_index: bool = Field(True, description="Index DataFrame by gene ID.")
+
+class VariantQueryRequest(BaseModel):
+    q: str = Field(..., description="Query string following Lucene syntax.")
+    fields: Optional[str] = Field(None, description="Comma-separated list of fields to return.")
+    size: int = Field(10, description="Maximum number of hits.")
+    skip: int = Field(0, description="Number of hits to skip.")
+    sort: Optional[str] = Field(None, description="Comma-separated fields to sort on.")
+    email: Optional[str] = Field(None, description="User email for tracking.")
+    as_dataframe: bool = Field(False, description="Return as DataFrame.")
+    df_index: bool = Field(True, description="Index DataFrame by _id.")
+
+class VariantQueryManyRequest(BaseModel):
+    query_list: str = Field(..., description="Comma-separated list of query terms.")
+    scopes: Optional[str] = Field(None, description="Comma-separated list of fields to search against.")
+    fields: Optional[str] = Field(None, description="Comma-separated list of fields to return.")
+    email: Optional[str] = Field(None, description="User email for tracking.")
+    as_dataframe: bool = Field(False, description="Return as DataFrame.")
+    df_index: bool = Field(True, description="Index DataFrame by matched query term.")
+
+class VariantRequest(BaseModel):
+    fields: Optional[str] = Field(None, description="Comma-separated list of fields to return.")
+    email: Optional[str] = Field(None, description="User email for tracking.")
+    as_dataframe: bool = Field(False, description="Return as DataFrame.")
+    df_index: bool = Field(True, description="Index DataFrame by _id.")
+
+class VariantsRequest(BaseModel):
+    variant_ids: str = Field(..., description="Comma-separated list of variant IDs.")
+    fields: Optional[str] = Field(None, description="Comma-separated list of fields to return.")
+    email: Optional[str] = Field(None, description="User email for tracking.")
+    as_dataframe: bool = Field(False, description="Return as DataFrame.")
+    df_index: bool = Field(True, description="Index DataFrame by variant ID.")
+
+class ChemQueryRequest(BaseModel):
+    q: str = Field(..., description="Query string.")
+    fields: Optional[str] = Field(None, description="Comma-separated list of fields to return.")
+    size: int = Field(10, description="Maximum number of results.")
+    skip: int = Field(0, description="Number of results to skip.")
+    sort: Optional[str] = Field(None, description="Sort field.")
+    email: Optional[str] = Field(None, description="User email for tracking.")
+    as_dataframe: bool = Field(False, description="Return as DataFrame.")
+    df_index: bool = Field(True, description="Index DataFrame by query.")
+
+class ChemQueryManyRequest(BaseModel):
+    query_list: str = Field(..., description="Comma-separated list of query strings.")
+    scopes: Optional[str] = Field(None, description="Comma-separated list of fields to search in.")
+    fields: Optional[str] = Field(None, description="Comma-separated list of fields to return.")
+    email: Optional[str] = Field(None, description="User email for tracking.")
+    as_dataframe: bool = Field(False, description="Return as DataFrame.")
+    df_index: bool = Field(True, description="Index DataFrame by query.")
+
+class ChemRequest(BaseModel):
+    fields: Optional[str] = Field(None, description="Comma-separated list of fields to return.")
+    email: Optional[str] = Field(None, description="User email for tracking.")
+    as_dataframe: bool = Field(False, description="Return as DataFrame.")
+    df_index: bool = Field(True, description="Index DataFrame by query.")
+
+class ChemsRequest(BaseModel):
+    chem_ids: str = Field(..., description="Comma-separated list of chemical IDs.")
+    fields: Optional[str] = Field(None, description="Comma-separated list of fields to return.")
+    email: Optional[str] = Field(None, description="User email for tracking.")
+    as_dataframe: bool = Field(False, description="Return as DataFrame.")
+    df_index: bool = Field(True, description="Index DataFrame by query.")
+
+class TaxonRequest(BaseModel):
+    fields: str = Field("all", description="Comma-separated list of fields to return.")
+    email: Optional[str] = Field(None, description="User email for tracking.")
+    as_dataframe: bool = Field(False, description="Return as DataFrame.")
+    df_index: bool = Field(True, description="Index DataFrame by query.")
+
+class TaxonsRequest(BaseModel):
+    taxon_ids: str = Field(..., description="Comma-separated list of taxon IDs.")
+    fields: Optional[str] = Field(None, description="Comma-separated list of fields to return.")
+    email: Optional[str] = Field(None, description="User email for tracking.")
+    as_dataframe: bool = Field(False, description="Return as DataFrame.")
+    df_index: bool = Field(True, description="Index DataFrame by query.")
+
+class TaxonQueryRequest(BaseModel):
+    q: str = Field(..., description="Query string.")
+    fields: Optional[str] = Field(None, description="Comma-separated list of fields to return.")
+    size: int = Field(10, description="Maximum number of results.")
+    skip: int = Field(0, description="Number of results to skip.")
+    sort: Optional[str] = Field(None, description="Sort field.")
+    email: Optional[str] = Field(None, description="User email for tracking.")
+    as_dataframe: bool = Field(False, description="Return as DataFrame.")
+    df_index: bool = Field(True, description="Index DataFrame by query.")
+
+class TaxonQueryManyRequest(BaseModel):
+    query_list: str = Field(..., description="Comma-separated list of query strings.")
+    scopes: Optional[str] = Field(None, description="Comma-separated list of fields to search in.")
+    fields: Optional[str] = Field(None, description="Comma-separated list of fields to return.")
+    email: Optional[str] = Field(None, description="User email for tracking.")
+    as_dataframe: bool = Field(False, description="Return as DataFrame.")
+    df_index: bool = Field(True, description="Index DataFrame by query.")
+
 
 class QueryResponse(BaseModel):
     hits: List[GeneResponse]
@@ -49,7 +193,7 @@ class GeneRoutesMixin:
     def _gene_routes_config(self):
         """Configure gene routes for the API"""
 
-        @self.get(
+        @self.post(
             "/gene/query",
             response_model=QueryResponse,
             tags=["genes"],
@@ -98,54 +242,28 @@ class GeneRoutesMixin:
             The response includes pagination information (`total`, `max_score`, `took`) and the list of matching `hits`.
             """
         )
-        async def query_genes(
-            q: str = Query(
-                ...,
-                description="Query string following Lucene syntax. See endpoint description for details and examples.",
-                examples=[
-                    "symbol:CDK2",  # Fielded query
-                    "name:\"cyclin-dependent kinase 2\"", # Phrase query
-                    "refseq.rna:NM_001798", # Dot notation field
-                    "taxid:[9606 TO 10090]", # Range query
-                    "symbol:CDK2 AND taxid:9606", # Boolean query
-                    "symbol:CDK* AND NOT taxid:9606", # Wildcard and boolean
-                    "name:*kinase*", # Wildcard query
-                    "(symbol:CDK2 OR symbol:BRCA1) AND taxid:9606", # Grouped boolean
-                    "entrezgene:>1000" # Range query
-                ]
-            ),
-            fields: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to return from the matching gene hits. Supports dot notation (e.g., `refseq.rna`). If `fields=all`, all available fields are returned. Default: `symbol,name,taxid,entrezgene`.",
-                examples=[
-                    "symbol,name,taxid,entrezgene", # Default
-                    "symbol,name,refseq.rna",
-                    "ensembl.gene,uniprot.Swiss-Prot",
-                    "summary,genomic_pos.chr,genomic_pos.start",
-                    "all" # Return all fields
-                ]
-            ),
-            size: int = Query(10, description="Maximum number of matching gene hits to return (capped at 1000). Default: 10.", examples=[10, 50, 1000]),
-            skip: int = Query(0, description="Number of matching gene hits to skip, starting from 0 (for pagination). Default: 0.", examples=[0, 10, 50]),
-            sort: Optional[str] = Query(None, description="Comma-separated fields to sort on. Prefix with `-` for descending order (e.g., `-symbol`). Default: sort by relevance score (`_score`) descending.", examples=["_score", "-_score", "symbol", "-entrezgene"]),
-            species: Optional[str] = Query(None, description="Filter results by species. Accepts comma-separated taxonomy IDs (e.g., `9606,10090`) or common names for human, mouse, rat, fruitfly, nematode, zebrafish, thale-cress, frog, pig. Default: searches all species.", examples=["9606", "human", "10090"]),
-            email: Optional[str] = Query(None, description="Optional user email for usage tracking.", examples=["user@example.com"]),
-            as_dataframe: bool = Query(False, description="Return results as a pandas DataFrame instead of JSON. Default: False.", examples=[True, False]),
-            df_index: bool = Query(True, description="When `as_dataframe=True`, index the DataFrame by the internal `_id`. Default: True.", examples=[True, False])
-        ):
+        async def query_genes(request: GeneQueryRequest):
             """Query genes"""
-            log_message(message_type="debug:query_genes:entry", q=q, size=size)
-            with start_action(action_type="api:query_genes", q=str(q), fields=str(fields), size=size, skip=skip, sort=str(sort), species=str(species), email=str(email), as_dataframe=as_dataframe, df_index=df_index):
+            with start_action(action_type="api:query_genes", q=str(request.q), size=request.size) as action:
                 try:
+                    result = {}
                     async with GeneClientAsync() as client:
-                        log_message(message_type="debug:query_genes:context_entered")
-                        # Simplify call to match test_query_async
-                        result = await client.query(q, size=size) 
-                        log_message(message_type="debug:query_genes:raw_result", result=repr(result))
+                        action.log(message_type="debug:query_genes:context_entered")
+                        result = await client.query(
+                            request.q,
+                            fields=request.fields.split(",") if request.fields else None,
+                            size=request.size,
+                            skip=request.skip,
+                            sort=request.sort,
+                            species=request.species,
+                            email=request.email,
+                            as_dataframe=request.as_dataframe,
+                            df_index=request.df_index
+                        ) 
+                        action.log(message_type="debug:query_genes:raw_result", result=repr(result))
 
-                    # Process result (keeping robust handling)
                     if not isinstance(result, dict):
-                        log_message(message_type="debug:query_genes:result_not_dict")
+                        action.log(message_type="debug:query_genes:result_not_dict")
                         result = {}
                     hits = result.get("hits", [])
                     validated_hits = []
@@ -153,7 +271,7 @@ class GeneRoutesMixin:
                         try:
                             validated_hits.append(GeneResponse.model_validate(hit))
                         except Exception as e:
-                            log_message(message_type="warning:query_genes:hit_validation_error", error=str(e), hit=repr(hit))
+                            action.log(message_type="warning:query_genes:hit_validation_error", error=str(e), hit=repr(hit))
                             pass 
                     
                     response_obj = QueryResponse(
@@ -162,13 +280,13 @@ class GeneRoutesMixin:
                         max_score=result.get("max_score"),
                         took=result.get("took")
                     )
-                    log_message(message_type="debug:query_genes:returning", response=repr(response_obj))
+                    action.log(message_type="debug:query_genes:returning", response=repr(response_obj))
                     return response_obj
                 except Exception as e:
-                    log_message(message_type="error:query_genes", error=str(e))
+                    action.log(message_type="error:query_genes", error=str(e))
                     raise
 
-        @self.get(
+        @self.post(
             "/gene/querymany",
             response_model=List[GeneResponse],
             tags=["genes"],
@@ -195,62 +313,28 @@ class GeneRoutesMixin:
             - Terms with no matches are **omitted** from the response list (unlike the POST endpoint which returns a `notfound` entry).
             """
         )
-        async def query_many_genes(
-            query_list: str = Query(
-                ...,
-                description="Comma-separated list of query terms (e.g., gene IDs, symbols, names). Do NOT use complex query strings here; use `/gene/query` for that.",
-                examples=[
-                    "1017,1018", # Entrez IDs
-                    "CDK2,BRCA1", # Symbols
-                    "ENSG00000123374,ENSG00000139618", # Ensembl IDs
-                    "1017,BRCA1", # Mixed IDs/Symbols
-                    "cyclin-dependent kinase 2,breast cancer 1" # Names (use quotes if spaces)
-                ]
-            ),
-            scopes: Optional[str] = Query(
-                "entrezgene,ensemblgene,retired", # Default based on MyGene.info POST default
-                description="Comma-separated list of fields to search the terms in `query_list` against. Default: `entrezgene,ensemblgene,retired`.",
-                examples=[
-                    "symbol",
-                    "entrezgene",
-                    "ensembl.gene",
-                    "symbol,alias",
-                    "entrezgene,ensemblgene,retired" # Default
-                ]
-            ),
-            fields: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to return from the matching gene hits. Default: `symbol,name,taxid,entrezgene`.",
-                examples=[
-                    "symbol,name,taxid,entrezgene", # Default
-                    "symbol,name,refseq.rna",
-                    "ensembl.gene,uniprot.Swiss-Prot",
-                    "all" # Return all fields
-                ]
-            ),
-            species: Optional[str] = Query(None, description="Filter results by species (comma-separated taxonomy IDs or common names). Default: searches all species.", examples=["9606", "human", "10090", "mouse,rat", "9606,10090"]),
-            email: Optional[str] = Query(None, description="Optional user email for usage tracking.", examples=["user@example.com"]),
-            as_dataframe: bool = Query(False, description="Return results as a pandas DataFrame. Default: False.", examples=[True, False]),
-            df_index: bool = Query(True, description="When `as_dataframe=True`, index the DataFrame by the matched `query` term. Default: True.", examples=[True, False]),
-            size: int = Query(10, description="Maximum number of hits to return *per query term* (capped at 1000). Default: 10.", examples=[1, 5, 10, 1000])
-        ):
+        async def query_many_genes(request: GeneQueryManyRequest):
             """Batch query genes"""
-            log_message(message_type="debug:query_many_genes:entry", query_list=query_list, scopes=scopes, size=size)
-            with start_action(action_type="api:query_many_genes", query_list=str(query_list), scopes=str(scopes), fields=str(fields), species=str(species), email=str(email), as_dataframe=str(as_dataframe), df_index=str(df_index), size=size):
+            with start_action(action_type="api:query_many_genes", query_list=str(request.query_list), scopes=str(request.scopes), fields=str(request.fields), species=str(request.species), email=str(request.email), as_dataframe=str(request.as_dataframe), df_index=str(request.df_index), size=request.size) as action:
                 try:
+                    result = []
                     async with GeneClientAsync() as client:
-                        log_message(message_type="debug:query_many_genes:context_entered")
-                        # Simplify call to match test_querymany_async
-                        _query_list = query_list.split(",")
-                        _scopes = scopes.split(",") if scopes else None
-                        # Pass size to the client call
-                        result = await client.querymany(_query_list, scopes=_scopes, size=size) 
-                        log_message(message_type="debug:query_many_genes:raw_result", result=repr(result))
+                        action.log(message_type="debug:query_many_genes:context_entered")
+                        result = await client.querymany(
+                            request.query_list.split(","), 
+                            scopes=request.scopes.split(",") if request.scopes else None,
+                            fields=request.fields.split(",") if request.fields else None,
+                            species=request.species,
+                            email=request.email,
+                            as_dataframe=request.as_dataframe,
+                            df_index=request.df_index,
+                            size=request.size
+                        ) 
+                        action.log(message_type="debug:query_many_genes:raw_result", result=repr(result))
 
-                    # Process result (keeping robust handling)
                     if not isinstance(result, list):
-                        log_message(message_type="debug:query_many_genes:result_not_list")
-                        return [] # Return empty list directly if result is not a list
+                        action.log(message_type="debug:query_many_genes:result_not_list")
+                        return [] 
                     
                     validated_genes = []
                     for gene_data in result:
@@ -258,18 +342,18 @@ class GeneRoutesMixin:
                             try:
                                 validated_genes.append(GeneResponse.model_validate(gene_data))
                             except Exception as e:
-                                log_message(message_type="warning:query_many_genes:gene_validation_error", error=str(e), data=repr(gene_data))
+                                action.log(message_type="warning:query_many_genes:gene_validation_error", error=str(e), data=repr(gene_data))
                                 pass 
                         elif gene_data is not None: 
-                            log_message(message_type="warning:query_many_genes:unexpected_data_type", data=repr(gene_data))
+                            action.log(message_type="warning:query_many_genes:unexpected_data_type", data=repr(gene_data))
                     
-                    log_message(message_type="debug:query_many_genes:returning", response=repr(validated_genes))
+                    action.log(message_type="debug:query_many_genes:returning", response=repr(validated_genes))
                     return validated_genes
                 except Exception as e:
-                    log_message(message_type="error:query_many_genes", error=str(e))
+                    action.log(message_type="error:query_many_genes", error=str(e))
                     raise
 
-        @self.get(
+        @self.post(
             "/gene/metadata",
             response_model=MetadataResponse,
             tags=["genes"],
@@ -288,20 +372,21 @@ class GeneRoutesMixin:
             - `version`: Data version information.
             """
         )
-        async def get_gene_metadata():
+        async def get_gene_metadata(request: Optional[GeneMetadataRequest] = None): # Made request body optional
             """Get gene database metadata"""
-            log_message(message_type="debug:get_gene_metadata:entry")
-            with start_action(action_type="api:get_gene_metadata"):
+            email_for_tracking = request.email if request and request.email else None
+            # Log the email if provided, but don't pass it to client.metadata()
+            with start_action(action_type="api:get_gene_metadata", email_provided=bool(email_for_tracking)) as action:
                 try:
+                    result = None
                     async with GeneClientAsync() as client:
-                        log_message(message_type="debug:get_gene_metadata:context_entered")
-                        # Call matches test_metadata_async
+                        action.log(message_type="debug:get_gene_metadata:context_entered")
+                        # Call client.metadata() without the email argument
                         result = await client.metadata()
-                        log_message(message_type="debug:get_gene_metadata:raw_result", result=repr(result))
-                        
-                    # Process result (keeping robust handling)
+                        action.log(message_type="debug:get_gene_metadata:raw_result", result=repr(result))
+                    
                     if not isinstance(result, dict):
-                        log_message(message_type="debug:get_gene_metadata:result_not_dict")
+                        action.log(message_type="debug:get_gene_metadata:result_not_dict")
                         result = {}
                     stats = result.get("stats", {})
                     
@@ -311,13 +396,13 @@ class GeneRoutesMixin:
                         index=result.get("index"),
                         version=result.get("version")
                     )
-                    log_message(message_type="debug:get_gene_metadata:returning", response=repr(response_obj))
+                    action.log(message_type="debug:get_gene_metadata:returning", response=repr(response_obj))
                     return response_obj
                 except Exception as e:
-                    log_message(message_type="error:get_gene_metadata", error=str(e))
+                    action.log(message_type="error:get_gene_metadata", error=str(e))
                     raise
 
-        @self.get(
+        @self.post(
             "/gene/{gene_id}",
             response_model=GeneResponse,
             tags=["genes"],
@@ -338,51 +423,35 @@ class GeneRoutesMixin:
             """
         )
         async def get_gene(
-            gene_id: str = Path(..., description="Gene identifier (Entrez Gene ID or Ensembl Gene ID)", examples=["1017", "ENSG00000123374"]),
-            fields: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to return. Default: `symbol,name,taxid,entrezgene` (plus other core fields). Use `all` for everything.",
-                examples=[
-                    "symbol,name,taxid,entrezgene", # Default
-                    "symbol,name,summary",
-                    "refseq,uniprot",
-                    "all"
-                ]
-            ),
-            species: Optional[str] = Query(
-                None,
-                description="Optional: Specify species (taxonomy ID or common name) to ensure the ID belongs to the correct species.",
-                examples=["9606", "human", "10090"]
-            ),
-            email: Optional[str] = Query(
-                None,
-                description="Optional user email for usage tracking.",
-                examples=["user@example.com"]
-            ),
-            # Parameters like as_dataframe, df_index, size, skip, sort are less relevant here 
-            # as it retrieves a single specific document, but kept for consistency with client method
-            as_dataframe: bool = Query(False, description="Return result as a pandas DataFrame. Default: False.", examples=[True, False], include_in_schema=False),
-            df_index: bool = Query(True, description="When `as_dataframe=True`, index DataFrame by `_id`. Default: True.", examples=[True, False], include_in_schema=False),
-            size: int = Query(10, description="Maximum number of results (irrelevant for single ID fetch).", include_in_schema=False),
-            skip: int = Query(0, description="Number of results to skip (irrelevant for single ID fetch).", include_in_schema=False),
-            sort: Optional[str] = Query(None, description="Sort field (irrelevant for single ID fetch).", include_in_schema=False)
+            gene_id: str = FastApiPath(..., description="Gene identifier (Entrez Gene ID or Ensembl Gene ID)", examples=["1017", "ENSG00000123374"]),
+            request: Optional[GeneRequest] = None # Made request body optional
         ):
             """Get gene information by ID"""
-            with start_action(action_type="api:get_gene", gene_id=str(gene_id), fields=str(fields), species=str(species), email=str(email), as_dataframe=as_dataframe, df_index=df_index, size=size, skip=skip, sort=str(sort)):
+            # Use request body if provided, otherwise use defaults (empty or None)
+            _fields = request.fields if request and request.fields else None
+            _species = request.species if request and request.species else None
+            _email = request.email if request and request.email else None
+            _as_dataframe = request.as_dataframe if request else False
+            _df_index = request.df_index if request else True
+            _size = request.size if request else 10
+            _skip = request.skip if request else 0
+            _sort = request.sort if request and request.sort else None            
+
+            with start_action(action_type="api:get_gene", gene_id=str(gene_id), fields=str(_fields), species=str(_species), email=str(_email), as_dataframe=_as_dataframe, df_index=_df_index, size=_size, skip=_skip, sort=str(_sort)) as action:
                 async with GeneClientAsync() as client:
                     return await client.getgene(
                         gene_id,
-                        fields=fields.split(",") if fields else None,
-                        species=species,
-                        email=email,
-                        as_dataframe=as_dataframe,
-                        df_index=df_index,
-                        size=size,
-                        skip=skip,
-                        sort=sort
+                        fields=_fields.split(",") if _fields else None,
+                        species=_species,
+                        email=_email,
+                        as_dataframe=_as_dataframe,
+                        df_index=_df_index,
+                        size=_size,
+                        skip=_skip,
+                        sort=_sort
                     )
 
-        @self.get(
+        @self.post(
             "/genes",
             response_model=List[GeneResponse],
             tags=["genes"],
@@ -406,57 +475,17 @@ class GeneRoutesMixin:
             The order of results in the response list corresponds to the order of IDs in the input `gene_ids` string.
             """
         )
-        async def get_genes(
-            gene_ids: str = Query(
-                ...,
-                description="Comma-separated list of gene IDs (Entrez or Ensembl).",
-                examples=[
-                    "1017,1018",
-                    "ENSG00000123374,ENSG00000134057",
-                    "1017,ENSG00000134057"
-                ]
-            ),
-            fields: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to return for each gene. Default: `symbol,name,taxid,entrezgene` (plus other core fields). Use `all` for everything.",
-                examples=[
-                    "symbol,name,taxid,entrezgene", # Default
-                    "symbol,name,summary",
-                    "refseq,uniprot",
-                    "all"
-                ]
-            ),
-            species: Optional[str] = Query(
-                None,
-                description="Optional: Specify species (taxonomy ID or common name) to filter results.",
-                examples=["9606", "human", "10090"]
-            ),
-            email: Optional[str] = Query(
-                None,
-                description="Optional user email for usage tracking.",
-                examples=["user@example.com"]
-            ),
-            as_dataframe: bool = Query(
-                False,
-                description="Return results as a pandas DataFrame. Default: False.",
-                examples=[True, False]
-            ),
-            df_index: bool = Query(
-                True,
-                description="When `as_dataframe=True`, index DataFrame by the gene ID (`_id`). Default: True.",
-                examples=[True, False]
-            )
-        ):
+        async def get_genes(request: GenesRequest):
             """Get information for multiple genes"""
-            with start_action(action_type="api:get_genes", gene_ids=str(gene_ids), fields=str(fields), species=str(species), email=str(email), as_dataframe=as_dataframe, df_index=df_index):
+            with start_action(action_type="api:get_genes", gene_ids=str(request.gene_ids), fields=str(request.fields), species=str(request.species), email=str(request.email), as_dataframe=request.as_dataframe, df_index=request.df_index) as action:
                 async with GeneClientAsync() as client:
                     return await client.getgenes(
-                        gene_ids.split(","),
-                        fields=fields.split(",") if fields else None,
-                        species=species,
-                        email=email,
-                        as_dataframe=as_dataframe,
-                        df_index=df_index
+                        request.gene_ids.split(","),
+                        fields=request.fields.split(",") if request.fields else None,
+                        species=request.species,
+                        email=request.email,
+                        as_dataframe=request.as_dataframe,
+                        df_index=request.df_index
                     )
 
 class VariantsRoutesMixin:
@@ -464,7 +493,7 @@ class VariantsRoutesMixin:
         """Configure variants routes for the API"""
 
         # Define query routes BEFORE specific ID routes to avoid path conflicts
-        @self.get(
+        @self.post(
             "/variant/query",
             response_model=VariantQueryResponse,
             tags=["variants"],
@@ -512,60 +541,31 @@ class VariantsRoutesMixin:
             The response includes pagination information (`total`, `max_score`, `took`) and the list of matching `hits`.
             """
         )
-        async def query_variants(
-            q: str = Query(
-                ...,
-                description="Query string following Lucene syntax. See endpoint description and MyVariant.info docs for details.",
-                examples=[
-                    "rs58991260", # Simple query by rsID
-                    "chr1:69000-70000", # Genomic range
-                    "dbsnp.vartype:snp", # Fielded query
-                    "dbnsfp.polyphen2.hdiv.pred:(D P)", # Fielded query with multiple values
-                    "_exists_:dbsnp", # Existence query
-                    "dbnsfp.polyphen2.hdiv.score:>0.99", # Range query
-                    "dbnsfp.genename:CDK*", # Wildcard query
-                    "_exists_:dbsnp AND dbsnp.vartype:snp", # Boolean query
-                    "chr1:69000-70000 AND _exists_:clinvar" # Combined range and boolean
-                ]
-            ),
-            fields: Optional[str] = Query(
-                None, # Default is 'all' from client
-                description="Comma-separated list of fields to return. Supports dot notation (e.g., `dbnsfp.genename`) and wildcards (`chebi.*`). Default: `all`.",
-                examples=[
-                    "all", # Default
-                    "cadd.phred,dbsnp.rsid",
-                    "clinvar.clinical_significance",
-                    "dbnsfp.sift_pred,dbnsfp.polyphen2_hdiv_pred",
-                    "dbnsfp.*"
-                ]
-            ),
-            size: int = Query(10, description="Maximum number of matching variant hits to return (capped at 1000). Default: 10.", examples=[10, 50, 1000]),
-            skip: int = Query(0, description="Number of matching variant hits to skip, starting from 0 (for pagination). Default: 0.", examples=[0, 10, 50]),
-            sort: Optional[str] = Query(None, description="Comma-separated fields to sort on. Prefix with `-` for descending order. Default: sort by relevance score (`_score`) descending.", examples=["_score", "-cadd.phred", "dbsnp.rsid"]),
-            email: Optional[str] = Query(None, description="Optional user email for usage tracking.", examples=["user@example.com"]),
-            as_dataframe: bool = Query(False, description="Return results as a pandas DataFrame. Default: False.", examples=[True, False]),
-            df_index: bool = Query(True, description="When `as_dataframe=True`, index DataFrame by `_id`. Default: True.", examples=[True, False])
-        ):
+        async def query_variants(request: VariantQueryRequest):
             """Query variants"""
-            with start_action(action_type="api:query_variants", q=str(q), fields=str(fields), size=size, skip=skip, sort=str(sort), email=str(email), as_dataframe=as_dataframe, df_index=df_index):
-                async with VariantClientAsync() as client:
-                    result = await client.query(
-                        q,
-                        fields=fields.split(",") if fields else None,
-                        size=size,
-                        skip=skip,
-                        sort=sort,
-                        email=email,
-                        as_dataframe=as_dataframe,
-                        df_index=df_index
-                    )
+            with start_action(action_type="api:query_variants", q=str(request.q), fields=str(request.fields), size=request.size, skip=request.skip, sort=str(request.sort), email=str(request.email), as_dataframe=request.as_dataframe, df_index=request.df_index) as action:
+                try:
+                    result = {}
+                    async with VariantClientAsync() as client:
+                        result = await client.query(
+                            request.q,
+                            fields=request.fields.split(",") if request.fields else None,
+                            size=request.size,
+                            skip=request.skip,
+                            sort=request.sort,
+                            email=request.email,
+                            as_dataframe=request.as_dataframe,
+                            df_index=request.df_index
+                        )
+                        action.log(message_type="debug:query_variants:raw_result", result=repr(result))
+
                     validated_hits = []
                     if isinstance(result, dict) and "hits" in result and isinstance(result["hits"], list):
                         for hit in result["hits"]:
                             try:
                                 validated_hits.append(VariantResponse.model_validate(hit))
                             except Exception as e:
-                                log_message(message_type="warning:query_variants:hit_validation_error", error=str(e), hit=repr(hit))
+                                action.log(message_type="warning:query_variants:hit_validation_error", error=str(e), hit=repr(hit))
                                 pass 
                     
                     return VariantQueryResponse(
@@ -574,8 +574,11 @@ class VariantsRoutesMixin:
                         max_score=result.get("max_score") if isinstance(result, dict) else None,
                         took=result.get("took") if isinstance(result, dict) else None,
                     )
+                except Exception as e:
+                    action.log(message_type="error:query_variants", error=str(e))
+                    raise
 
-        @self.get(
+        @self.post(
             "/variants/querymany",
             tags=["variants"],
             summary="Batch query variants",
@@ -600,55 +603,28 @@ class VariantsRoutesMixin:
             - Terms with no matches are **omitted** from the response list (unlike the MyVariant POST endpoint which returns a `notfound` entry).
             """
         )
-        async def query_many_variants(
-            query_list: str = Query(
-                ...,
-                description="Comma-separated list of query terms (e.g., rsIDs, HGVS IDs). Do NOT use complex Lucene queries here; use `/variant/query` for that.",
-                examples=[
-                    "rs58991260,rs12190874", # rsIDs
-                    "chr7:g.140453134T>C,chr1:g.69511A>G", # HGVS IDs
-                    "rs58991260,chr1:g.69511A>G" # Mixed
-                ]
-            ),
-            scopes: Optional[str] = Query(
-                None, # Default scopes depend on the underlying client
-                description="Comma-separated list of fields to search the terms in `query_list` against. If omitted, default scopes of the client are used (often includes `_id`, `dbsnp.rsid`, etc.).",
-                examples=[
-                    "dbsnp.rsid",
-                    "_id", # For HGVS IDs
-                    "clinvar.hgvs.coding,clinvar.hgvs.genomic",
-                    "dbsnp.rsid,_id"
-                ]
-            ),
-            fields: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to return. Supports dot notation and wildcards. If `all` or omitted, all fields may be returned (client default).",
-                examples=[
-                    "cadd.phred,dbsnp.rsid",
-                    "clinvar.clinical_significance",
-                    "dbnsfp.sift_pred,dbnsfp.polyphen2_hdiv_pred",
-                    "dbnsfp.*",
-                    "all"
-                ]
-            ),
-            email: Optional[str] = Query(None, description="Optional user email for usage tracking.", examples=["user@example.com"]),
-            as_dataframe: bool = Query(False, description="Return results as a pandas DataFrame. Default: False.", examples=[True, False]),
-            df_index: bool = Query(True, description="When `as_dataframe=True`, index DataFrame by the matched `query` term. Default: True.", examples=[True, False])
-        ):
+        async def query_many_variants(request: VariantQueryManyRequest):
             """Batch query variants"""
-            with start_action(action_type="api:query_many_variants", query_list=str(query_list), scopes=str(scopes), fields=str(fields), email=str(email), as_dataframe=as_dataframe, df_index=df_index):
-                async with VariantClientAsync() as client:
-                    return await client.querymany(
-                        query_list.split(","),
-                        scopes=scopes.split(",") if scopes else None,
-                        fields=fields.split(",") if fields else None,
-                        email=email,
-                        as_dataframe=as_dataframe,
-                        df_index=df_index
-                    )
+            with start_action(action_type="api:query_many_variants", query_list=str(request.query_list), scopes=str(request.scopes), fields=str(request.fields), email=str(request.email), as_dataframe=request.as_dataframe, df_index=request.df_index) as action:
+                try:
+                    result = []
+                    async with VariantClientAsync() as client:
+                        result = await client.querymany(
+                            request.query_list.split(","),
+                            scopes=request.scopes.split(",") if request.scopes else None,
+                            fields=request.fields.split(",") if request.fields else None,
+                            email=request.email,
+                            as_dataframe=request.as_dataframe,
+                            df_index=request.df_index
+                        )
+                        action.log(message_type="debug:query_many_variants:raw_result", result=repr(result))
+                    return result
+                except Exception as e:
+                    action.log(message_type="error:query_many_variants", error=str(e))
+                    raise
             
         # Define specific ID routes AFTER query routes
-        @self.get(
+        @self.post(
             "/variant/{variant_id}",
             response_model=VariantResponse,
             tags=["variants"],
@@ -670,46 +646,26 @@ class VariantsRoutesMixin:
             """
         )
         async def get_variant(
-            variant_id: str = Path(..., description="Variant identifier (HGVS ID or dbSNP rsID)", examples=["chr7:g.140453134T>C", "rs58991260"]),
-            fields: Optional[str] = Query(
-                None, # Default is effectively 'all' via the client
-                description="Comma-separated list of fields to filter the returned annotation object. Supports dot notation (e.g., `cadd.gene`) and wildcards (`dbnsfp.*`). Default: `all` (returns the full object).",
-                examples=[
-                    "all", # Default
-                    "cadd.phred,dbsnp.rsid",
-                    "clinvar.clinical_significance",
-                    "dbnsfp.sift_pred,dbnsfp.polyphen2_hdiv_pred",
-                    "dbnsfp.*" 
-                ]
-            ),
-            email: Optional[str] = Query(
-                None,
-                description="Optional user email for usage tracking.",
-                examples=["user@example.com"]
-            ),
-            as_dataframe: bool = Query(
-                False,
-                description="Return result as a pandas DataFrame. Default: False.",
-                examples=[True, False]
-            ),
-            df_index: bool = Query(
-                True,
-                description="When `as_dataframe=True`, index DataFrame by `_id`. Default: True.",
-                examples=[True, False]
-            )
+            variant_id: str = FastApiPath(..., description="Variant identifier (HGVS ID or dbSNP rsID)", examples=["chr7:g.140453134T>C", "rs58991260"]),
+            request: Optional[VariantRequest] = None # Made request body optional
         ):
             """Get variant information by ID"""
-            with start_action(action_type="api:get_variant", variant_id=str(variant_id), fields=str(fields), email=str(email), as_dataframe=as_dataframe, df_index=df_index):
+            _fields = request.fields if request and request.fields else None
+            _email = request.email if request and request.email else None
+            _as_dataframe = request.as_dataframe if request else False
+            _df_index = request.df_index if request else True
+
+            with start_action(action_type="api:get_variant", variant_id=str(variant_id), fields=str(_fields), email=str(_email), as_dataframe=_as_dataframe, df_index=_df_index) as action:
                 async with VariantClientAsync() as client:
                     return await client.getvariant(
                         variant_id,
-                        fields=fields.split(",") if fields else None,
-                        email=email,
-                        as_dataframe=as_dataframe,
-                        df_index=df_index
+                        fields=_fields.split(",") if _fields else None,
+                        email=_email,
+                        as_dataframe=_as_dataframe,
+                        df_index=_df_index
                     )
 
-        @self.get(
+        @self.post(
             "/variants",
             response_model=List[VariantResponse],
             tags=["variants"],
@@ -735,52 +691,16 @@ class VariantsRoutesMixin:
             The order of results generally corresponds to the input order but may vary for mixed ID types or invalid IDs.
             """
         )
-        async def get_variants(
-            variant_ids: str = Query(
-                ...,
-                description="Comma-separated list of variant IDs (HGVS or dbSNP rsIDs, max 1000).",
-                examples=[
-                    "chr7:g.140453134T>C,chr1:g.69511A>G",
-                    "rs58991260,rs2500",
-                    "chr7:g.140453134T>C,rs58991260"
-                ]
-            ),
-            fields: Optional[str] = Query(
-                None, # Default is effectively 'all' via the client
-                description="Comma-separated list of fields to filter the returned annotation objects. Supports dot notation and wildcards. Default: `all` (returns full objects).",
-                examples=[
-                    "all", # Default
-                    "cadd.phred,dbsnp.rsid",
-                    "clinvar.clinical_significance",
-                    "dbnsfp.sift_pred,dbnsfp.polyphen2_hdiv_pred",
-                    "dbnsfp.*"
-                ]
-            ),
-            email: Optional[str] = Query(
-                None,
-                description="Optional user email for usage tracking.",
-                examples=["user@example.com"]
-            ),
-            as_dataframe: bool = Query(
-                False,
-                description="Return results as a pandas DataFrame. Default: False.",
-                examples=[True, False]
-            ),
-            df_index: bool = Query(
-                True,
-                description="When `as_dataframe=True`, index DataFrame by the variant ID (`_id`). Default: True.",
-                examples=[True, False]
-            )
-        ):
+        async def get_variants(request: VariantsRequest):
             """Get information for multiple variants"""
-            with start_action(action_type="api:get_variants", variant_ids=str(variant_ids), fields=str(fields), email=str(email), as_dataframe=as_dataframe, df_index=df_index):
+            with start_action(action_type="api:get_variants", variant_ids=str(request.variant_ids), fields=str(request.fields), email=str(request.email), as_dataframe=request.as_dataframe, df_index=request.df_index) as action:
                 async with VariantClientAsync() as client:
                     return await client.getvariants(
-                        variant_ids.split(","),
-                        fields=fields.split(",") if fields else None,
-                        email=email,
-                        as_dataframe=as_dataframe,
-                        df_index=df_index
+                        request.variant_ids.split(","),
+                        fields=request.fields.split(",") if request.fields else None,
+                        email=request.email,
+                        as_dataframe=request.as_dataframe,
+                        df_index=request.df_index
                     )
 
 class ChemRoutesMixin:
@@ -788,7 +708,7 @@ class ChemRoutesMixin:
         """Configure chemical routes for the API"""
 
         # Define query routes BEFORE specific ID routes
-        @self.get(
+        @self.post(
             "/chem/query",
             response_model=ChemQueryResponse,
             tags=["chemicals"],
@@ -822,57 +742,27 @@ class ChemRoutesMixin:
             The response includes pagination information and can be returned as a pandas DataFrame.
             """
         )
-        async def query_chems(
-            q: str = Query(
-                ...,
-                description="Query string",
-                examples=[
-                    "C6H12O6",
-                    "pubchem.molecular_formula:C6H12O6",
-                    "pubchem.molecular_weight:[100 TO 200]",
-                    "pubchem.xlogp:>2",
-                    "pubchem.hydrogen_bond_donor_count:>2 AND pubchem.hydrogen_bond_acceptor_count:>4"
-                ]
-            ),
-            fields: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to return",
-                examples=[
-                    "pubchem.molecular_formula,pubchem.molecular_weight",
-                    "pubchem.smiles,pubchem.inchi",
-                    "pubchem.hydrogen_bond_donor_count,pubchem.hydrogen_bond_acceptor_count"
-                ]
-            ),
-            size: int = Query(10, description="Maximum number of results to return (max 1000)", examples=[10, 50, 100]),
-            skip: int = Query(0, description="Number of results to skip (for pagination)", examples=[0, 10, 20]),
-            sort: Optional[str] = Query(None, description="Sort field, prefix with '-' for descending order", examples=["_score", "-_score", "pubchem.molecular_weight"]),
-            email: Optional[str] = Query(None, description="User email for tracking usage", examples=["user@example.com"]),
-            as_dataframe: bool = Query(False, description="Return results as pandas DataFrame", examples=[True, False]),
-            df_index: bool = Query(True, description="Index DataFrame by query (only if as_dataframe=True)", examples=[True, False])
-        ):
+        async def query_chems(request: ChemQueryRequest):
             """Query chemicals"""
-            with start_action(action_type="api:query_chems", q=str(q), fields=str(fields), size=size, skip=skip, sort=str(sort), email=str(email), as_dataframe=as_dataframe, df_index=df_index):
+            with start_action(action_type="api:query_chems", q=str(request.q), fields=str(request.fields), size=request.size, skip=request.skip, sort=str(request.sort), email=str(request.email), as_dataframe=request.as_dataframe, df_index=request.df_index) as action:
                 async with ChemClientAsync() as client:
-                    # Call the query method
                     result = await client.query(
-                        q,
-                        fields=fields.split(",") if fields else None,
-                        size=size,
-                        skip=skip,
-                        sort=sort,
-                        email=email,
-                        as_dataframe=as_dataframe,
-                        df_index=df_index
+                        request.q,
+                        fields=request.fields.split(",") if request.fields else None,
+                        size=request.size,
+                        skip=request.skip,
+                        sort=request.sort,
+                        email=request.email,
+                        as_dataframe=request.as_dataframe,
+                        df_index=request.df_index
                     )
-                    # Validate and structure the response according to ChemQueryResponse
                     validated_hits = []
                     if isinstance(result, dict) and "hits" in result and isinstance(result["hits"], list):
                         for hit in result["hits"]:
                             try:
-                                # Individual hits still need validation if they are meant to be ChemResponse
                                 validated_hits.append(ChemResponse.model_validate(hit))
                             except Exception as e:
-                                log_message(message_type="warning:query_chems:hit_validation_error", error=str(e), hit=repr(hit))
+                                action.log(message_type="warning:query_chems:hit_validation_error", error=str(e), hit=repr(hit))
                                 pass 
                     
                     return ChemQueryResponse(
@@ -882,7 +772,7 @@ class ChemRoutesMixin:
                         took=result.get("took") if isinstance(result, dict) else None,
                     )
 
-        @self.get(
+        @self.post(
             "/chems/querymany",
             tags=["chemicals"],
             summary="Batch query chemicals",
@@ -908,52 +798,21 @@ class ChemRoutesMixin:
             The response can be returned as a pandas DataFrame for easier data manipulation.
             """
         )
-        async def query_many_chems(
-            query_list: str = Query(
-                ...,
-                description="Comma-separated list of query strings",
-                examples=[
-                    "C6H12O6,C12H22O11",
-                    "glucose,sucrose",
-                    "C6H12O6,sucrose"
-                ]
-            ),
-            scopes: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to search in",
-                examples=[
-                    "pubchem.molecular_formula,pubchem.iupac",
-                    "pubchem.smiles,pubchem.inchi",
-                    "pubchem.molecular_weight,pubchem.xlogp"
-                ]
-            ),
-            fields: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to return",
-                examples=[
-                    "pubchem.molecular_formula,pubchem.molecular_weight",
-                    "pubchem.smiles,pubchem.inchi",
-                    "pubchem.hydrogen_bond_donor_count,pubchem.hydrogen_bond_acceptor_count"
-                ]
-            ),
-            email: Optional[str] = Query(None, description="User email for tracking usage", examples=["user@example.com"]),
-            as_dataframe: bool = Query(False, description="Return results as pandas DataFrame", examples=[True, False]),
-            df_index: bool = Query(True, description="Index DataFrame by query (only if as_dataframe=True)", examples=[True, False])
-        ):
+        async def query_many_chems(request: ChemQueryManyRequest):
             """Batch query chemicals"""
-            with start_action(action_type="api:query_many_chems", query_list=str(query_list), scopes=str(scopes), fields=str(fields), email=str(email), as_dataframe=as_dataframe, df_index=df_index):
+            with start_action(action_type="api:query_many_chems", query_list=str(request.query_list), scopes=str(request.scopes), fields=str(request.fields), email=str(request.email), as_dataframe=request.as_dataframe, df_index=request.df_index) as action:
                 async with ChemClientAsync() as client:
                     return await client.querymany(
-                        query_list.split(","),
-                        scopes=scopes.split(",") if scopes else None,
-                        fields=fields.split(",") if fields else None,
-                        email=email,
-                        as_dataframe=as_dataframe,
-                        df_index=df_index
+                        request.query_list.split(","),
+                        scopes=request.scopes.split(",") if request.scopes else None,
+                        fields=request.fields.split(",") if request.fields else None,
+                        email=request.email,
+                        as_dataframe=request.as_dataframe,
+                        df_index=request.df_index
                     )
 
         # Define specific ID routes AFTER query routes
-        @self.get(
+        @self.post(
             "/chem/{chem_id}",
             response_model=ChemResponse,
             tags=["chemicals"],
@@ -983,44 +842,26 @@ class ChemRoutesMixin:
             """
         )
         async def get_chem(
-            chem_id: str = Path(..., description="Chemical identifier", examples=["KTUFNOKKBVMGRW-UHFFFAOYSA-N", "5793", "C([C@@H]1[C@H]([C@@H]([C@H]([C@H](O1)O)O)O)O"]),
-            fields: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to return",
-                examples=[
-                    "pubchem.molecular_formula,pubchem.molecular_weight",
-                    "pubchem.smiles,pubchem.inchi",
-                    "pubchem.hydrogen_bond_donor_count,pubchem.hydrogen_bond_acceptor_count"
-                ]
-            ),
-            email: Optional[str] = Query(
-                None,
-                description="User email for tracking usage",
-                examples=["user@example.com"]
-            ),
-            as_dataframe: bool = Query(
-                False,
-                description="Return results as pandas DataFrame",
-                examples=[True, False]
-            ),
-            df_index: bool = Query(
-                True,
-                description="Index DataFrame by query (only if as_dataframe=True)",
-                examples=[True, False]
-            )
+            chem_id: str = FastApiPath(..., description="Chemical identifier", examples=["KTUFNOKKBVMGRW-UHFFFAOYSA-N", "5793", "C([C@@H]1[C@H]([C@@H]([C@H]([C@H](O1)O)O)O)O"]),
+            request: Optional[ChemRequest] = None # Made request body optional
         ):
             """Get chemical information by ID"""
-            with start_action(action_type="api:get_chem", chem_id=str(chem_id), fields=str(fields), email=str(email), as_dataframe=as_dataframe, df_index=df_index):
+            _fields = request.fields if request and request.fields else None
+            _email = request.email if request and request.email else None
+            _as_dataframe = request.as_dataframe if request else False
+            _df_index = request.df_index if request else True
+
+            with start_action(action_type="api:get_chem", chem_id=str(chem_id), fields=str(_fields), email=str(_email), as_dataframe=_as_dataframe, df_index=_df_index) as action:
                 async with ChemClientAsync() as client:
                     return await client.getchem(
                         chem_id,
-                        fields=fields.split(",") if fields else None,
-                        email=email,
-                        as_dataframe=as_dataframe,
-                        df_index=df_index
+                        fields=_fields.split(",") if _fields else None,
+                        email=_email,
+                        as_dataframe=_as_dataframe,
+                        df_index=_df_index
                     )
 
-        @self.get(
+        @self.post(
             "/chems",
             response_model=List[ChemResponse],
             tags=["chemicals"],
@@ -1040,56 +881,22 @@ class ChemRoutesMixin:
             You can filter the returned fields using the 'fields' parameter.
             """
         )
-        async def get_chems(
-            chem_ids: str = Query(
-                ...,
-                description="Comma-separated list of chemical IDs",
-                examples=[
-                    "KTUFNOKKBVMGRW-UHFFFAOYSA-N,XEFQLINVKFYRCS-UHFFFAOYSA-N",
-                    "5793,5281",
-                    "KTUFNOKKBVMGRW-UHFFFAOYSA-N,5281"
-                ]
-            ),
-            fields: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to return",
-                examples=[
-                    "pubchem.molecular_formula,pubchem.molecular_weight",
-                    "pubchem.smiles,pubchem.inchi",
-                    "pubchem.hydrogen_bond_donor_count,pubchem.hydrogen_bond_acceptor_count"
-                ]
-            ),
-            email: Optional[str] = Query(
-                None,
-                description="User email for tracking usage",
-                examples=["user@example.com"]
-            ),
-            as_dataframe: bool = Query(
-                False,
-                description="Return results as pandas DataFrame",
-                examples=[True, False]
-            ),
-            df_index: bool = Query(
-                True,
-                description="Index DataFrame by query (only if as_dataframe=True)",
-                examples=[True, False]
-            )
-        ):
+        async def get_chems(request: ChemsRequest):
             """Get information for multiple chemicals"""
-            with start_action(action_type="api:get_chems", chem_ids=str(chem_ids), fields=str(fields), email=str(email), as_dataframe=as_dataframe, df_index=df_index):
+            with start_action(action_type="api:get_chems", chem_ids=str(request.chem_ids), fields=str(request.fields), email=str(request.email), as_dataframe=request.as_dataframe, df_index=request.df_index) as action:
                 async with ChemClientAsync() as client:
                     return await client.getchems(
-                        chem_ids.split(","),
-                        fields=fields.split(",") if fields else None,
-                        email=email,
-                        as_dataframe=as_dataframe,
-                        df_index=df_index
+                        request.chem_ids.split(","),
+                        fields=request.fields.split(",") if request.fields else None,
+                        email=request.email,
+                        as_dataframe=request.as_dataframe,
+                        df_index=request.df_index
                     )
 
 class TaxonRoutesMixin:
     def _taxon_routes_config(self):
         """Configure taxon routes for the API"""
-        @self.get(
+        @self.post(
             "/taxon/{taxon_id}",
             response_model=TaxonResponse,
             tags=["taxons"],
@@ -1115,54 +922,30 @@ class TaxonRoutesMixin:
             """
         )
         async def get_taxon(
-            taxon_id: str = Path(..., description="Taxon identifier (NCBI ID or scientific name)", examples=["9606", "Homo sapiens"]),
-            fields: str = Query(
-                "all",
-                description="Comma-separated list of fields to return. Use 'all' to return all fields (default).",
-                examples=[
-                    "all",
-                    "scientific_name,common_name,rank",
-                    "id,scientific_name,lineage",
-                    "taxid,parent_taxid,rank"
-                ]
-            ),
-            email: Optional[str] = Query(
-                None,
-                description="User email for tracking usage",
-                examples=["user@example.com"]
-            ),
-            as_dataframe: bool = Query(
-                False,
-                description="Return results as pandas DataFrame",
-                examples=[True, False]
-            ),
-            df_index: bool = Query(
-                True,
-                description="Index DataFrame by query (only if as_dataframe=True)",
-                examples=[True, False]
-            )
+            taxon_id: str = FastApiPath(..., description="Taxon identifier (NCBI ID or scientific name)", examples=["9606", "Homo sapiens"]),
+            request: Optional[TaxonRequest] = None # Made request body optional
         ):
             """Get taxon information by ID"""
-            # Replace underscores with spaces in scientific names
-            #if not taxon_id.isdigit():
-            #    taxon_id = taxon_id.replace("_", " ")
+            _fields = request.fields if request and request.fields else "all"
+            _email = request.email if request and request.email else None
+            _as_dataframe = request.as_dataframe if request else False
+            _df_index = request.df_index if request else True            
             
-            # Convert fields string to list if provided and not "all"
-            fields_list = fields.split(",") if fields != "all" else None
+            fields_list = _fields.split(",") if _fields != "all" else None
             
             async with TaxonClientAsync() as client:
                 result = await client.gettaxon(
                     taxon_id,
                     fields=fields_list,
-                    email=email,
-                    as_dataframe=as_dataframe,
-                    df_index=df_index
+                    email=_email,
+                    as_dataframe=_as_dataframe,
+                    df_index=_df_index
                 )
                 if result is None:
                     raise HTTPException(status_code=404, detail=f"Taxon '{taxon_id}' not found")
                 return result
 
-        @self.get(
+        @self.post(
             "/taxons",
             response_model=List[TaxonResponse],
             tags=["taxons"],
@@ -1184,52 +967,18 @@ class TaxonRoutesMixin:
             You can filter the returned fields using the 'fields' parameter.
             """
         )
-        async def get_taxons(
-            taxon_ids: str = Query(
-                ...,
-                description="Comma-separated list of taxon IDs",
-                examples=[
-                    "9606,10090",
-                    "Homo sapiens,Mus musculus",
-                    "9606,Mus musculus"
-                ]
-            ),
-            fields: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to return",
-                examples=[
-                    "scientific_name,common_name,rank",
-                    "id,scientific_name,lineage",
-                    "taxid,parent_taxid,rank"
-                ]
-            ),
-            email: Optional[str] = Query(
-                None,
-                description="User email for tracking usage",
-                examples=["user@example.com"]
-            ),
-            as_dataframe: bool = Query(
-                False,
-                description="Return results as pandas DataFrame",
-                examples=[True, False]
-            ),
-            df_index: bool = Query(
-                True,
-                description="Index DataFrame by query (only if as_dataframe=True)",
-                examples=[True, False]
-            )
-        ):
+        async def get_taxons(request: TaxonsRequest):
             """Get information for multiple taxa"""
             async with TaxonClientAsync() as client:
                 return await client.gettaxons(
-                    taxon_ids.split(","),
-                    fields=fields.split(",") if fields else None,
-                    email=email,
-                    as_dataframe=as_dataframe,
-                    df_index=df_index
+                    request.taxon_ids.split(","),
+                    fields=request.fields.split(",") if request.fields else None,
+                    email=request.email,
+                    as_dataframe=request.as_dataframe,
+                    df_index=request.df_index
                 )
 
-        @self.get(
+        @self.post(
             "/taxon/query",
             response_model=TaxonQueryResponse,
             tags=["taxons"],
@@ -1264,66 +1013,37 @@ class TaxonRoutesMixin:
             The response includes pagination information and can be returned as a pandas DataFrame.
             """
         )
-        async def query_taxons(
-            q: str = Query(
-                ...,
-                description="Query string",
-                examples=[
-                    "scientific_name:Homo sapiens",
-                    "rank:species",
-                    "taxid:[9606 TO 10090]",
-                    "rank:species AND has_gene:true",
-                    "scientific_name:Homo* AND NOT rank:genus"
-                ]
-            ),
-            fields: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to return",
-                examples=[
-                    "scientific_name,common_name,rank",
-                    "id,scientific_name,lineage",
-                    "taxid,parent_taxid,rank"
-                ]
-            ),
-            size: int = Query(10, description="Maximum number of results to return (max 1000)", examples=[10, 50, 100]),
-            skip: int = Query(0, description="Number of results to skip (for pagination)", examples=[0, 10, 20]),
-            sort: Optional[str] = Query(None, description="Sort field, prefix with '-' for descending order", examples=["_score", "-_score", "scientific_name"]),
-            email: Optional[str] = Query(None, description="User email for tracking usage", examples=["user@example.com"]),
-            as_dataframe: bool = Query(False, description="Return results as pandas DataFrame", examples=[True, False]),
-            df_index: bool = Query(True, description="Index DataFrame by query (only if as_dataframe=True)", examples=[True, False])
-        ):
+        async def query_taxons(request: TaxonQueryRequest):
             """Query taxa"""
-            async with TaxonClientAsync() as client:
-                # Call the query method
-                result = await client.query(
-                    q,
-                    fields=fields.split(",") if fields else None,
-                    size=size,
-                    skip=skip,
-                    sort=sort,
-                    email=email,
-                    as_dataframe=as_dataframe,
-                    df_index=df_index
-                )
-                # Validate and structure the response according to TaxonQueryResponse
-                validated_hits = []
-                if isinstance(result, dict) and "hits" in result and isinstance(result["hits"], list):
-                    for hit in result["hits"]:
-                        try:
-                            # Individual hits need validation
-                            validated_hits.append(TaxonResponse.model_validate(hit))
-                        except Exception as e:
-                            log_message(message_type="warning:query_taxons:hit_validation_error", error=str(e), hit=repr(hit))
-                            pass 
-                    
-                return TaxonQueryResponse(
-                    hits=validated_hits,
-                    total=result.get("total") if isinstance(result, dict) else None,
-                    max_score=result.get("max_score") if isinstance(result, dict) else None,
-                    took=result.get("took") if isinstance(result, dict) else None,
-                )
+            with start_action(action_type="api:query_taxons", q=str(request.q), fields=str(request.fields), size=request.size, skip=request.skip, sort=str(request.sort), email=str(request.email), as_dataframe=request.as_dataframe, df_index=request.df_index) as action:
+                async with TaxonClientAsync() as client:
+                    result = await client.query(
+                        request.q,
+                        fields=request.fields.split(",") if request.fields else None,
+                        size=request.size,
+                        skip=request.skip,
+                        sort=request.sort,
+                        email=request.email,
+                        as_dataframe=request.as_dataframe,
+                        df_index=request.df_index
+                    )
+                    validated_hits = []
+                    if isinstance(result, dict) and "hits" in result and isinstance(result["hits"], list):
+                        for hit in result["hits"]:
+                            try:
+                                validated_hits.append(TaxonResponse.model_validate(hit))
+                            except Exception as e:
+                                action.log(message_type="warning:query_taxons:hit_validation_error", error=str(e), hit=repr(hit))
+                                pass 
+                        
+                    return TaxonQueryResponse(
+                        hits=validated_hits,
+                        total=result.get("total") if isinstance(result, dict) else None,
+                        max_score=result.get("max_score") if isinstance(result, dict) else None,
+                        took=result.get("took") if isinstance(result, dict) else None,
+                    )
 
-        @self.get(
+        @self.post(
             "/taxons/querymany",
             tags=["taxons"],
             summary="Batch query taxa",
@@ -1349,47 +1069,16 @@ class TaxonRoutesMixin:
             The response can be returned as a pandas DataFrame for easier data manipulation.
             """
         )
-        async def query_many_taxons(
-            query_list: str = Query(
-                ...,
-                description="Comma-separated list of query strings",
-                examples=[
-                    "Homo sapiens,Mus musculus",
-                    "human,mouse",
-                    "9606,Mus musculus"
-                ]
-            ),
-            scopes: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to search in",
-                examples=[
-                    "scientific_name,common_name",
-                    "taxid,parent_taxid",
-                    "rank,lineage"
-                ]
-            ),
-            fields: Optional[str] = Query(
-                None,
-                description="Comma-separated list of fields to return",
-                examples=[
-                    "scientific_name,common_name,rank",
-                    "id,scientific_name,lineage",
-                    "taxid,parent_taxid,rank"
-                ]
-            ),
-            email: Optional[str] = Query(None, description="User email for tracking usage", examples=["user@example.com"]),
-            as_dataframe: bool = Query(False, description="Return results as pandas DataFrame", examples=[True, False]),
-            df_index: bool = Query(True, description="Index DataFrame by query (only if as_dataframe=True)", examples=[True, False])
-        ):
+        async def query_many_taxons(request: TaxonQueryManyRequest):
             """Batch query taxa"""
             async with TaxonClientAsync() as client:
                 return await client.querymany(
-                    query_list.split(","),
-                    scopes=scopes.split(",") if scopes else None,
-                    fields=fields.split(",") if fields else None,
-                    email=email,
-                    as_dataframe=as_dataframe,
-                    df_index=df_index
+                    request.query_list.split(","),
+                    scopes=request.scopes.split(",") if request.scopes else None,
+                    fields=request.fields.split(",") if request.fields else None,
+                    email=request.email,
+                    as_dataframe=request.as_dataframe,
+                    df_index=request.df_index
                 )
             
 class BiothingsRestAPI(FastAPI, GeneRoutesMixin, VariantsRoutesMixin, ChemRoutesMixin, TaxonRoutesMixin):
@@ -1452,6 +1141,6 @@ class BiothingsRestAPI(FastAPI, GeneRoutesMixin, VariantsRoutesMixin, ChemRoutes
         self._taxon_routes_config()
 
         # Add root route that redirects to docs
-        @self.get("/", include_in_schema=False)
+        @self.post("/", include_in_schema=False)
         async def root():
             return RedirectResponse(url="/docs")

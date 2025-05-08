@@ -73,7 +73,10 @@ docker-compose up
 
 This will start:
 - The MCP server on port 3001
-- The MCP Inspector on port 6277
+- The MCP Inspector on port 5173
+
+
+It is important to know that not all MCP clients support sse, even anthropic desktop 
 
 2. Using Docker directly:
 
@@ -125,6 +128,11 @@ After that you can explore its methods with MCP Inspector at http://127.0.0.1:62
 *If you choose to use the Inspector via `npx`, ensure you have Node.js and npm installed. Using [nvm](https://github.com/nvm-sh/nvm) (Node Version Manager) is recommended for managing Node.js versions.*
 
 This opens a web interface where you can explore and test all available tools.
+
+## Bridging for MCP clients that support only STDIO ways:
+
+MCP is a new standard so even its founder, Anthropic does not fully support its specification in thei Claude Desktop.
+To enable 
 
 ## Documentation
 

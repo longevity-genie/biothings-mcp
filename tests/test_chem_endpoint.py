@@ -30,7 +30,7 @@ IBUPROFEN_INCHIKEY = "HEFNNWSXXWATRW-UHFFFAOYSA-N"
 
 def test_get_chem_endpoint(client):
     """Test the /chem/{chem_id} endpoint."""
-    response = client.get(f"/chem/{ASPIRIN_INCHIKEY}")
+    response = client.post(f"/chem/{ASPIRIN_INCHIKEY}", json={})
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == ASPIRIN_INCHIKEY
@@ -44,7 +44,7 @@ def test_get_chem_endpoint(client):
 def test_get_chem_with_fields_endpoint(client):
     """Test the /chem/{chem_id} endpoint with specific fields."""
     fields = "pubchem.molecular_formula,pubchem.cid"
-    response = client.get(f"/chem/{ASPIRIN_INCHIKEY}?fields={fields}")
+    response = client.post(f"/chem/{ASPIRIN_INCHIKEY}", json={"fields": fields})
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == ASPIRIN_INCHIKEY
@@ -57,7 +57,12 @@ def test_get_chem_with_fields_endpoint(client):
 def test_get_chems_endpoint(client):
     """Test the /chems endpoint for multiple chemicals."""
     chem_ids = f"{ASPIRIN_INCHIKEY},{IBUPROFEN_INCHIKEY}"
-    response = client.get(f"/chems?chem_ids={chem_ids}")
+    # Make sure JSON body has the right structure
+    response = client.post("/chems", json={
+        "chem_ids": chem_ids,
+        "fields": None,  # Add default/expected fields
+        "as_dataframe": False
+    })
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 2
@@ -70,7 +75,13 @@ def test_query_chems_endpoint(client):
     """Test the /chem/query endpoint."""
     # Query for Aspirin by name (adjust query field if needed)
     query = "aspirin"
-    response = client.get(f"/chem/query?q={query}&size=1")
+    # Make sure JSON body has the right structure
+    response = client.post("/chem/query", json={
+        "q": query,
+        "size": 1,
+        "fields": None,
+        "as_dataframe": False
+    })
     assert response.status_code == 200
     data = response.json()
     assert "hits" in data
@@ -97,7 +108,13 @@ def test_query_many_chems_endpoint(client):
     query_list = "2244,3672"
     # Specify the scope as pubchem.cid
     scopes = "pubchem.cid"
-    response = client.get(f"/chems/querymany?query_list={query_list}&scopes={scopes}")
+    # Make sure JSON body has the right structure
+    response = client.post("/chems/querymany", json={
+        "query_list": query_list,
+        "scopes": scopes,
+        "fields": None,
+        "as_dataframe": False
+    })
     assert response.status_code == 200
     data = response.json()
     # Expect results for both queries when searching by CID

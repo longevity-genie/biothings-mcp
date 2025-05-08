@@ -28,7 +28,7 @@ def client():
 
 def test_get_taxon_endpoint(client):
     """Test the /taxon/{taxon_id} endpoint."""
-    response = client.get(f"/taxon/{HUMAN_TAXID}")
+    response = client.post(f"/taxon/{HUMAN_TAXID}", json={})
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == str(HUMAN_TAXID)
@@ -39,7 +39,7 @@ def test_get_taxon_endpoint(client):
 def test_get_taxon_with_fields_endpoint(client):
     """Test the /taxon/{taxon_id} endpoint with specific fields."""
     fields = "scientific_name,rank"
-    response = client.get(f"/taxon/{HUMAN_TAXID}?fields={fields}")
+    response = client.post(f"/taxon/{HUMAN_TAXID}", json={"fields": fields})
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == str(HUMAN_TAXID) # ID should still be present
@@ -82,7 +82,13 @@ def test_query_many_taxons_endpoint(client):
     """Test the /taxons/querymany endpoint."""
     query_list = f"{HUMAN_TAXID},{MOUSE_TAXID}"
     scopes = "taxid" # Query by taxid
-    response = client.get(f"/taxons/querymany?query_list={query_list}&scopes={scopes}")
+    # Make sure JSON body has the right structure
+    response = client.post("/taxons/querymany", json={
+        "query_list": query_list,
+        "scopes": scopes,
+        "fields": None,
+        "as_dataframe": False
+    })
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 2

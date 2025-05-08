@@ -34,7 +34,7 @@ def client():
 def test_get_variant_endpoint(client):
     """Test the /variant/{variant_id} endpoint."""
     variant_id = "chr7:g.140453134T>C"
-    response = client.get(f"/variant/{variant_id}")
+    response = client.post(f"/variant/{variant_id}", json={})
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == variant_id
@@ -48,7 +48,7 @@ def test_get_variant_with_fields_endpoint(client):
     """Test the /variant/{variant_id} endpoint with specific fields."""
     variant_id = "chr7:g.140453134T>C"
     fields = "chrom,vcf.ref,vcf.alt,vcf.position"
-    response = client.get(f"/variant/{variant_id}?fields={fields}")
+    response = client.post(f"/variant/{variant_id}", json={"fields": fields})
     assert response.status_code == 200
     data = response.json()
     # Check that we have the requested fields
@@ -71,7 +71,12 @@ def test_get_variant_with_fields_endpoint(client):
 def test_get_variants_endpoint(client):
     """Test the /variants endpoint for multiple variants."""
     variant_ids = "chr7:g.140453134T>C,chr9:g.107620835G>A"
-    response = client.get(f"/variants?variant_ids={variant_ids}")
+    # Make sure JSON body has the right structure
+    response = client.post("/variants", json={
+        "variant_ids": variant_ids,
+        "fields": None,  # Add default/expected fields
+        "as_dataframe": False
+    })
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 2
@@ -84,7 +89,15 @@ def test_get_variants_endpoint(client):
 def test_query_variants_endpoint(client):
     """Test the /variant/query endpoint."""
     query = "dbnsfp.genename:cdk2"
-    response = client.get(f"/variant/query?q={query}&size=5")
+    # Make sure JSON body has the right structure
+    response = client.post("/variant/query", json={
+        "q": query,
+        "size": 5,
+        "fields": None,
+        "as_dataframe": False,
+        "sort": None,
+        "skip": 0
+    })
     assert response.status_code == 200
     data = response.json()
     # Check the structure based on VariantQueryResponse
@@ -108,7 +121,13 @@ def test_query_many_variants_endpoint(client):
     """Test the /variants/querymany endpoint."""
     query_list = "rs58991260,rs12190874"
     scopes = "dbsnp.rsid"
-    response = client.get(f"/variants/querymany?query_list={query_list}&scopes={scopes}")
+    # Make sure JSON body has the right structure
+    response = client.post("/variants/querymany", json={
+        "query_list": query_list,
+        "scopes": scopes,
+        "fields": None,
+        "as_dataframe": False
+    })
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 2

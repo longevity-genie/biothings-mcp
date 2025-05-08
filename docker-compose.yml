@@ -11,6 +11,7 @@ services:
   inspector:
     image: mcp/inspector
     ports:
+      - "5173:5173"
       - "6277:6277"
     environment:
       - MCP_SERVER_URL=http://app:3001/mcp

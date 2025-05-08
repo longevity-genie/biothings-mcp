@@ -41,7 +41,7 @@ def test_get_gene_endpoint(client):
     
     The test uses the CDK2 gene (ID: 1017) as an example.
     """
-    response = client.get("/gene/1017")
+    response = client.post("/gene/1017", json={})
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == "1017"
@@ -61,7 +61,7 @@ def test_get_gene_with_fields_endpoint(client):
     The test uses the CDK2 gene (ID: 1017) as an example and requests only
     the symbol and name fields.
     """
-    response = client.get("/gene/1017?fields=symbol,name")
+    response = client.post("/gene/1017", json={"fields": "symbol,name"})
     assert response.status_code == 200
     data = response.json()
     # Check that we have the requested fields
@@ -84,7 +84,13 @@ def test_get_genes_endpoint(client):
     
     The test uses two genes (CDK2 and CDK3) as examples.
     """
-    response = client.get("/genes?gene_ids=1017,1018")
+    # Make sure JSON body has the right structure
+    response = client.post("/genes", json={
+        "gene_ids": "1017,1018",
+        "fields": None,  # Add default/expected fields
+        "as_dataframe": False,
+        "species": None
+    })
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 2
@@ -103,7 +109,16 @@ def test_query_genes_endpoint(client):
     
     The test queries for the CDK2 gene using its symbol.
     """
-    response = client.get("/gene/query?q=symbol:CDK2&size=1")
+    # Make sure JSON body has the right structure
+    response = client.post("/gene/query", json={
+        "q": "symbol:CDK2",
+        "size": 1,
+        "fields": None,
+        "as_dataframe": False,
+        "species": None,
+        "sort": None,
+        "skip": 0
+    })
     assert response.status_code == 200
     data = response.json()
     assert "hits" in data
@@ -123,7 +138,15 @@ def test_query_many_genes_endpoint(client):
     
     The test queries for two genes (CDK2 and BRCA1) using their symbols.
     """
-    response = client.get("/gene/querymany?query_list=CDK2,BRCA1&scopes=symbol&size=1")
+    # Make sure JSON body has the right structure
+    response = client.post("/gene/querymany", json={
+        "query_list": "CDK2,BRCA1",
+        "scopes": "symbol",
+        "size": 1,
+        "fields": None,
+        "as_dataframe": False,
+        "species": None
+    })
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 2
@@ -147,7 +170,7 @@ def test_metadata_endpoint(client):
     The metadata includes information about the total number of genes in the
     database and other statistics.
     """
-    response = client.get("/gene/metadata")
+    response = client.post("/gene/metadata", json={})
     assert response.status_code == 200
     data = response.json()
     assert isinstance(data, dict)
@@ -168,7 +191,7 @@ def test_get_gene_ensembl_id(client):
     The test uses the Ensembl ID ENSECAG00000002212 (likely from Cavia porcellus).
     """
     ensembl_id = "ENSECAG00000002212"
-    response = client.get(f"/gene/{ensembl_id}")
+    response = client.post(f"/gene/{ensembl_id}", json={})
     assert response.status_code == 200
     data = response.json()
     # Note: The actual ID field returned by MyGene.info for Ensembl might be different

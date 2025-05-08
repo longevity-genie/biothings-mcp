@@ -1,0 +1,11 @@
+{
+    "mcpServers": {
+      "biothings-mcp-stdin": {
+          "command": "uvx mcp-proxy",
+          "args": ["http://localhost:3001/mcp"],
+          "env": {
+            "API_ACCESS_TOKEN": "access-token"
+          }
+      }
+    }
+  }
