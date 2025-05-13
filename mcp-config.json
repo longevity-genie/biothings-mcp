@@ -1,8 +1,10 @@
 {
   "mcpServers": {
     "biothings-mcp": {
-      "type": "sse",
-      "url": "http://localhost:3001/mcp"
+      "url": "http://localhost:8000/mcp",
+      "env": {
+        "API_ACCESS_TOKEN": "access-token"
+      }
     }
   }
 }

@@ -2,19 +2,19 @@ services:
   app:
     image: ghcr.io/longevity-genie/biothings-mcp:latest
     ports:
-      - "3001:3001"
+      - "8000:8000"
     environment:
-      - MCP_PORT=3001
+      - MCP_PORT=8008
     networks:
       - mcp-network
 
   inspector:
     image: mcp/inspector
     ports:
-      - "5173:5173"
+      - "6274:6274"
       - "6277:6277"
     environment:
-      - MCP_SERVER_URL=http://app:3001/mcp
+      - MCP_SERVER_URL=http://app:8000/mcp
     depends_on:
       - app
     networks:

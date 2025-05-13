@@ -116,12 +116,21 @@ Run tests for the API endpoint:
 uv run pytest -vvv -s
 ```
 
-Test your MCP setup with the MCP Inspector:
+Test your MCP setup with the MCP Inspector.
+
+If you have local server running it will be:
+
+```bash
+npx @modelcontextprotocol/inspector --config mcp-config-remote.json --server biothings-mcp
+```
+if you want to try our remote server you should use:
 
 ```bash
 npx @modelcontextprotocol/inspector --config mcp-config.json --server biothings-mcp
 ```
+
 After that you can explore its methods with MCP Inspector at http://127.0.0.1:6274
+
 
 *Note: Using the MCP Inspector is optional. Most MCP clients (like Cursor, Windsurv, etc.) will automatically display the available tools from this server once configured. However, the Inspector can be useful for detailed testing and exploration.* 
 
@@ -131,8 +140,19 @@ This opens a web interface where you can explore and test all available tools.
 
 ## Bridging for MCP clients that support only STDIO ways:
 
-MCP is a new standard so even its founder, Anthropic does not fully support its specification in thei Claude Desktop.
-To enable 
+MCP is a new standard so even its founder, Anthropic does not fully support its specification in thei Claude Desktop. 
+
+For this reasons we also provide stdin versions of MCP
+We provide stdin configuration using the proxy (might need npx to run):
+* mcp-config-remote-stdin.json - for remote configuration
+* mcp-config-local-stdin.json - stdin configuration for localhost for MCP clients which do not support 
+
+For this reason we p
+
+## Configuration files
+
+To configure your MCP client (i.e. Cursor, Windsurf, Claude Desktop, etc.) you have to select copy-paste configuration from the json.
+If you want to call the server locally use
 
 ## Documentation
 

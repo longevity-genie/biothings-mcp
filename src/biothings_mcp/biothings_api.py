@@ -1,16 +1,29 @@
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any, Union, Literal, Callable, TypeVar, Sequence, Generic, Type, cast
+import json
+import os
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from fastapi import FastAPI, Query, Path as FastApiPath, HTTPException
-from fastapi.responses import RedirectResponse
-from biothings_typed_client.genes import GeneClientAsync, GeneResponse
-from biothings_typed_client.variants import VariantClientAsync, VariantResponse
-from biothings_typed_client.chem import ChemClientAsync, ChemResponse
-from biothings_typed_client.taxons import TaxonClientAsync, TaxonResponse
-from eliot import start_action
+from fastapi.responses import RedirectResponse, JSONResponse
+from starlette.responses import PlainTextResponse
+from concurrent.futures import ThreadPoolExecutor
+from biothings_typed_client.genes import GeneClientAsync, GeneResponse, GeneClient
+from biothings_typed_client.variants import VariantClientAsync, VariantResponse, VariantClient
+from biothings_typed_client.chem import ChemClientAsync, ChemResponse, ChemClient
+from biothings_typed_client.taxons import TaxonClientAsync, TaxonResponse, TaxonClient
+from eliot import start_action, to_file, Action, write_traceback
+
+# Custom TaxonResponse model making version field optional
+class TaxonResponse(TaxonResponse):
+    """Response model for taxon information with version field as optional"""
+    model_config = ConfigDict(extra='allow')
+    
+    # Override id and version fields to handle field validation properly
+    id: str = Field(..., description="Taxon identifier", validation_alias='_id', serialization_alias='id')
+    version: Optional[int] = Field(default=1, description="Version number", validation_alias='_version', serialization_alias='version')
 
 # Request Body Models
 
@@ -47,12 +60,12 @@ class GeneRequest(BaseModel):
     fields: Optional[str] = Field(None, description="Comma-separated list of fields to return.")
     species: Optional[str] = Field(None, description="Specify species.")
     email: Optional[str] = Field(None, description="User email for tracking.")
-    as_dataframe: bool = Field(False, description="Return as DataFrame.", include_in_schema=False) # Kept from original, though less common for single GETs
-    df_index: bool = Field(True, description="Index DataFrame by _id.", include_in_schema=False)
+    as_dataframe: bool = Field(False, description="Return as DataFrame.", json_schema_extra=False) # Kept from original, though less common for single GETs
+    df_index: bool = Field(True, description="Index DataFrame by _id.", json_schema_extra=False)
     # size, skip, sort are usually not applicable for single ID fetch but were in original Query params
-    size: int = Field(10, description="Max results (less relevant).", include_in_schema=False)
-    skip: int = Field(0, description="Skip results (less relevant).", include_in_schema=False)
-    sort: Optional[str] = Field(None, description="Sort field (less relevant).", include_in_schema=False)
+    size: int = Field(10, description="Max results (less relevant).", json_schema_extra=False)
+    skip: int = Field(0, description="Skip results (less relevant).", json_schema_extra=False)
+    sort: Optional[str] = Field(None, description="Sort field (less relevant).", json_schema_extra=False)
 
 
 class GenesRequest(BaseModel):
@@ -197,8 +210,9 @@ class GeneRoutesMixin:
             "/gene/query",
             response_model=QueryResponse,
             tags=["genes"],
-            summary="Query genes using a search string",
+            summary="Search genes via Lucene query, returning gene details and query metadata.",
             operation_id="query_genes",
+            response_description="Provides a list of `GeneResponse` objects (e.g., symbol, name, taxid) as 'hits', along with 'total' count, 'max_score', and 'took' time.",
             description="""
             Search for genes using a query string with various filtering options.
             
@@ -240,8 +254,8 @@ class GeneRoutesMixin:
             **Note:** See the [MyGene.info Query Syntax Guide](https://docs.mygene.info/en/latest/doc/query_service.html#query-syntax) for full details.
             
             The response includes pagination information (`total`, `max_score`, `took`) and the list of matching `hits`.
-            """
-        )
+            You are allowed to call this tool with the same arguments no more than 2 times consequently.
+            """)
         async def query_genes(request: GeneQueryRequest):
             """Query genes"""
             with start_action(action_type="api:query_genes", q=str(request.q), size=request.size) as action:
@@ -290,8 +304,9 @@ class GeneRoutesMixin:
             "/gene/querymany",
             response_model=List[GeneResponse],
             tags=["genes"],
-            summary="Batch query genes",
+            summary="Batch query genes by multiple terms, returning a list of gene details.",
             operation_id="query_many_genes",
+            response_description="Returns a list of `GeneResponse` objects, each including details like symbol, name, taxid, and the original query term.",
             description="""
             Perform multiple gene searches in a single request using a comma-separated list of query terms.
             This endpoint essentially performs a batch query similar to the POST request described in the [MyGene.info documentation](https://docs.mygene.info/en/latest/doc/query_service.html#batch-queries-via-post).
@@ -311,8 +326,8 @@ class GeneRoutesMixin:
             - Each object includes a `query` field indicating which term from the `query_list` it matched.
             - A single term from `query_list` might match multiple genes (e.g., a symbol matching genes in different species if `species` is not set, or matching multiple retired IDs).
             - Terms with no matches are **omitted** from the response list (unlike the POST endpoint which returns a `notfound` entry).
-            """
-        )
+            You are allowed to call this tool with the same arguments no more than 2 times consequently.
+            """)
         async def query_many_genes(request: GeneQueryManyRequest):
             """Batch query genes"""
             with start_action(action_type="api:query_many_genes", query_list=str(request.query_list), scopes=str(request.scopes), fields=str(request.fields), species=str(request.species), email=str(request.email), as_dataframe=str(request.as_dataframe), df_index=str(request.df_index), size=request.size) as action:
@@ -357,8 +372,9 @@ class GeneRoutesMixin:
             "/gene/metadata",
             response_model=MetadataResponse,
             tags=["genes"],
-            summary="Get gene database metadata",
+            summary="Retrieve MyGene.info database metadata including stats and fields.",
             operation_id="get_gene_metadata",
+            response_description="Returns `MetadataResponse` containing database `stats` (e.g., total genes), available `fields` with data types, `index` information, and data `version`.",
             description="""
             Retrieve metadata about the underlying MyGene.info gene annotation database, **NOT** information about specific genes.
             
@@ -370,8 +386,8 @@ class GeneRoutesMixin:
             - `fields`: Available gene annotation fields and their data types.
             - `index`: Information about the backend data index.
             - `version`: Data version information.
-            """
-        )
+            You are allowed to call this tool with the same arguments no more than 2 times consequently.
+            """)
         async def get_gene_metadata(request: Optional[GeneMetadataRequest] = None): # Made request body optional
             """Get gene database metadata"""
             email_for_tracking = request.email if request and request.email else None
@@ -406,8 +422,9 @@ class GeneRoutesMixin:
             "/gene/{gene_id}",
             response_model=GeneResponse,
             tags=["genes"],
-            summary="Get gene information by ID",
+            summary="Fetch a specific gene by Entrez or Ensembl ID.",
             operation_id="get_gene",
+            response_description="Returns a `GeneResponse` object containing detailed information for the specified gene, such as symbol, name, taxid, and entrezgene.",
             description="""
             Retrieves detailed information for a **single, specific gene** using its exact known identifier.
             
@@ -420,8 +437,8 @@ class GeneRoutesMixin:
             
             The response includes comprehensive gene information (fields can be customized using the `fields` parameter).
             If the ID is not found, a 404 error is returned.
-            """
-        )
+            You are allowed to call this tool with the same arguments no more than 2 times consequently.
+            """)
         async def get_gene(
             gene_id: str = FastApiPath(..., description="Gene identifier (Entrez Gene ID or Ensembl Gene ID)", examples=["1017", "ENSG00000123374"]),
             request: Optional[GeneRequest] = None # Made request body optional
@@ -455,8 +472,9 @@ class GeneRoutesMixin:
             "/genes",
             response_model=List[GeneResponse],
             tags=["genes"],
-            summary="Get information for multiple genes",
+            summary="Fetch multiple genes by a comma-separated list of Entrez or Ensembl IDs.",
             operation_id="get_genes",
+            response_description="Returns a list of `GeneResponse` objects, each containing detailed information (e.g., symbol, name, taxid) for the corresponding requested gene ID.",
             description="""
             Retrieves detailed information for **multiple specific genes** in a single request using their exact known identifiers.
             
@@ -473,8 +491,8 @@ class GeneRoutesMixin:
             
             The response is a list containing an object for each **found** gene ID. IDs that are not found are silently omitted from the response list.
             The order of results in the response list corresponds to the order of IDs in the input `gene_ids` string.
-            """
-        )
+            You are allowed to call this tool with the same arguments no more than 2 times consequently.
+            """)
         async def get_genes(request: GenesRequest):
             """Get information for multiple genes"""
             with start_action(action_type="api:get_genes", gene_ids=str(request.gene_ids), fields=str(request.fields), species=str(request.species), email=str(request.email), as_dataframe=request.as_dataframe, df_index=request.df_index) as action:
@@ -497,8 +515,9 @@ class VariantsRoutesMixin:
             "/variant/query",
             response_model=VariantQueryResponse,
             tags=["variants"],
-            summary="Query variants using a search string",
+            summary="Search variants via Lucene query (e.g., rsID, gene name), returning variant details and query metadata.",
             operation_id="query_variants",
+            response_description="Provides a list of `VariantResponse` objects (e.g., id, chrom, vcf details) as 'hits', along with 'total' count, 'max_score', and 'took' time.",
             description="""
             Search for variants using a query string with various filtering options, leveraging the MyVariant.info API.
             See the [MyVariant.info Query Syntax Guide](https://docs.myvariant.info/en/latest/doc/variant_query_service.html#query-syntax) for full details.
@@ -539,8 +558,8 @@ class VariantsRoutesMixin:
                - `q=chr1:69000-70000 AND dbnsfp.polyphen2.hdiv.score:>0.9`
 
             The response includes pagination information (`total`, `max_score`, `took`) and the list of matching `hits`.
-            """
-        )
+            You are allowed to call this tool with the same arguments no more than 2 times consequently.
+            """)
         async def query_variants(request: VariantQueryRequest):
             """Query variants"""
             with start_action(action_type="api:query_variants", q=str(request.q), fields=str(request.fields), size=request.size, skip=request.skip, sort=str(request.sort), email=str(request.email), as_dataframe=request.as_dataframe, df_index=request.df_index) as action:
@@ -580,9 +599,11 @@ class VariantsRoutesMixin:
 
         @self.post(
             "/variants/querymany",
+            response_model=List[VariantResponse], # Assuming this based on client and pattern
             tags=["variants"],
-            summary="Batch query variants",
+            summary="Batch query variants by multiple identifiers (e.g., rsIDs, HGVS IDs).",
             operation_id="query_many_variants",
+            response_description="Returns a list of `VariantResponse` objects, each including details like id, chrom, vcf information, and the original query term.",
             description="""
             Perform multiple variant queries in a single request using a comma-separated list of variant identifiers.
             This endpoint is similar to the POST batch query functionality in the [MyVariant.info API](https://docs.myvariant.info/en/latest/doc/variant_query_service.html#batch-queries-via-post).
@@ -601,8 +622,8 @@ class VariantsRoutesMixin:
             - Each object includes a `query` field indicating which term from the `query_list` it matched.
             - A single term might match multiple variants if the scope is broad (e.g., searching a gene name in `dbnsfp.genename`).
             - Terms with no matches are **omitted** from the response list (unlike the MyVariant POST endpoint which returns a `notfound` entry).
-            """
-        )
+            You are allowed to call this tool with the same arguments no more than 2 times consequently.
+            """)
         async def query_many_variants(request: VariantQueryManyRequest):
             """Batch query variants"""
             with start_action(action_type="api:query_many_variants", query_list=str(request.query_list), scopes=str(request.scopes), fields=str(request.fields), email=str(request.email), as_dataframe=request.as_dataframe, df_index=request.df_index) as action:
@@ -628,8 +649,9 @@ class VariantsRoutesMixin:
             "/variant/{variant_id}",
             response_model=VariantResponse,
             tags=["variants"],
-            summary="Get variant information by ID",
+            summary="Fetch a specific variant by HGVS or rsID.",
             operation_id="get_variant",
+            response_description="Returns a `VariantResponse` object containing detailed annotation data for the specified variant, such as id, chromosome, VCF info.",
             description="""
             Retrieves detailed annotation data for a **single, specific variant** using its identifier, powered by the MyVariant.info annotation service.
             See the [MyVariant.info Annotation Service Docs](https://docs.myvariant.info/en/latest/doc/variant_annotation_service.html).
@@ -643,8 +665,8 @@ class VariantsRoutesMixin:
             
             The response includes comprehensive variant annotation information. By default (`fields=all` or omitted), the complete annotation object is returned.
             If the ID is not found or invalid, a 404 error is returned.
-            """
-        )
+            You are allowed to call this tool with the same arguments no more than 2 times consequently.
+            """)
         async def get_variant(
             variant_id: str = FastApiPath(..., description="Variant identifier (HGVS ID or dbSNP rsID)", examples=["chr7:g.140453134T>C", "rs58991260"]),
             request: Optional[VariantRequest] = None # Made request body optional
@@ -669,8 +691,9 @@ class VariantsRoutesMixin:
             "/variants",
             response_model=List[VariantResponse],
             tags=["variants"],
-            summary="Get information for multiple variants",
+            summary="Fetch multiple variants by a comma-separated list of HGVS or rsIDs.",
             operation_id="get_variants",
+            response_description="Returns a list of `VariantResponse` objects, each containing detailed annotation data (e.g., id, chrom, vcf info) for the corresponding requested variant ID.",
             description="""
             Retrieves annotation data for **multiple specific variants** in a single request using their identifiers, similar to the MyVariant.info batch annotation service.
             See the [MyVariant.info Annotation Service Docs](https://docs.myvariant.info/en/latest/doc/variant_annotation_service.html#batch-queries-via-post).
@@ -689,8 +712,8 @@ class VariantsRoutesMixin:
             The response is a list containing the full annotation object for each **found** variant ID. IDs that are not found or are invalid are silently omitted from the response list.
             Each returned object includes a `query` field indicating the input ID it corresponds to.
             The order of results generally corresponds to the input order but may vary for mixed ID types or invalid IDs.
-            """
-        )
+            You are allowed to call this tool with the same arguments no more than 2 times consequently.
+            """)
         async def get_variants(request: VariantsRequest):
             """Get information for multiple variants"""
             with start_action(action_type="api:get_variants", variant_ids=str(request.variant_ids), fields=str(request.fields), email=str(request.email), as_dataframe=request.as_dataframe, df_index=request.df_index) as action:
@@ -712,8 +735,9 @@ class ChemRoutesMixin:
             "/chem/query",
             response_model=ChemQueryResponse,
             tags=["chemicals"],
-            summary="Query chemicals using a search string",
+            summary="Search chemical compounds via Lucene query (e.g., name, formula), returning compound details and query metadata.",
             operation_id="query_chems",
+            response_description="Provides a list of `ChemResponse` objects (e.g., id, PubChem formula, weight) as 'hits', along with 'total' count, 'max_score', and 'took' time.",
             description="""
             Search for chemical compounds using a query string with various filtering options.
             
@@ -740,8 +764,8 @@ class ChemRoutesMixin:
                - "pubchem.molecular_formula:C6H12O6 AND NOT pubchem.inchi_key:KTUFNOKKBVMGRW-UHFFFAOYSA-N"
             
             The response includes pagination information and can be returned as a pandas DataFrame.
-            """
-        )
+            You are allowed to call this tool with the same arguments no more than 2 times consequently.
+            """)
         async def query_chems(request: ChemQueryRequest):
             """Query chemicals"""
             with start_action(action_type="api:query_chems", q=str(request.q), fields=str(request.fields), size=request.size, skip=request.skip, sort=str(request.sort), email=str(request.email), as_dataframe=request.as_dataframe, df_index=request.df_index) as action:
@@ -774,9 +798,11 @@ class ChemRoutesMixin:
 
         @self.post(
             "/chems/querymany",
+            response_model=List[ChemResponse], # Assuming this based on client and pattern
             tags=["chemicals"],
-            summary="Batch query chemicals",
+            summary="Batch query chemical compounds by multiple terms (e.g., names, InChIKeys).",
             operation_id="query_many_chemicals",
+            response_description="Returns a list of `ChemResponse` objects, each including details like id, PubChem information, and the original query term.",
             description="""
             Perform multiple chemical queries in a single request.
             
@@ -796,8 +822,8 @@ class ChemRoutesMixin:
                - Return all fields: fields=None
             
             The response can be returned as a pandas DataFrame for easier data manipulation.
-            """
-        )
+            You are allowed to call this tool with the same arguments no more than 2 times consequently.
+            """)
         async def query_many_chems(request: ChemQueryManyRequest):
             """Batch query chemicals"""
             with start_action(action_type="api:query_many_chems", query_list=str(request.query_list), scopes=str(request.scopes), fields=str(request.fields), email=str(request.email), as_dataframe=request.as_dataframe, df_index=request.df_index) as action:
@@ -816,8 +842,9 @@ class ChemRoutesMixin:
             "/chem/{chem_id}",
             response_model=ChemResponse,
             tags=["chemicals"],
-            summary="Get chemical information by ID",
+            summary="Fetch a specific chemical compound by ID (e.g., InChIKey, PubChem CID).",
             operation_id="get_chem",
+            response_description="Returns a `ChemResponse` object containing detailed information for the specified chemical, including PubChem data like formula, weight, and XLogP.",
             description="""
             Retrieves detailed information about a specific chemical compound using its identifier.
             
@@ -839,8 +866,8 @@ class ChemRoutesMixin:
               - XLogP (octanol-water partition coefficient)
             
             You can filter the returned fields using the 'fields' parameter.
-            """
-        )
+            You are allowed to call this tool with the same arguments no more than 2 times consequently.
+            """)
         async def get_chem(
             chem_id: str = FastApiPath(..., description="Chemical identifier", examples=["KTUFNOKKBVMGRW-UHFFFAOYSA-N", "5793", "C([C@@H]1[C@H]([C@@H]([C@H]([C@H](O1)O)O)O)O"]),
             request: Optional[ChemRequest] = None # Made request body optional
@@ -865,8 +892,9 @@ class ChemRoutesMixin:
             "/chems",
             response_model=List[ChemResponse],
             tags=["chemicals"],
-            summary="Get information for multiple chemicals",
+            summary="Fetch multiple chemical compounds by a comma-separated list of IDs.",
             operation_id="get_chems",
+            response_description="Returns a list of `ChemResponse` objects, each containing detailed information (e.g., id, PubChem data) for the corresponding requested chemical ID.",
             description="""
             Retrieves information for multiple chemical compounds in a single request.
             
@@ -879,8 +907,8 @@ class ChemRoutesMixin:
             but for all requested compounds.
             
             You can filter the returned fields using the 'fields' parameter.
-            """
-        )
+            You are allowed to call this tool with the same arguments no more than 2 times consequently.
+            """)
         async def get_chems(request: ChemsRequest):
             """Get information for multiple chemicals"""
             with start_action(action_type="api:get_chems", chem_ids=str(request.chem_ids), fields=str(request.fields), email=str(request.email), as_dataframe=request.as_dataframe, df_index=request.df_index) as action:
@@ -900,8 +928,9 @@ class TaxonRoutesMixin:
             "/taxon/{taxon_id}",
             response_model=TaxonResponse,
             tags=["taxons"],
-            summary="Get taxon information by ID",
+            summary="Fetch a specific taxon by NCBI ID or scientific name.",
             operation_id="get_taxon",
+            response_description="Returns a `TaxonResponse` object containing detailed information for the specified taxon, such as scientific name, common name, rank, and lineage.",
             description="""
             Retrieves detailed information about a specific taxon using its identifier.
             
@@ -919,8 +948,8 @@ class TaxonRoutesMixin:
             - Gene data availability
             
             By default, all available fields are returned. You can filter the returned fields using the 'fields' parameter.
-            """
-        )
+            You are allowed to call this tool with the same arguments no more than 2 times consequently.
+            """)
         async def get_taxon(
             taxon_id: str = FastApiPath(..., description="Taxon identifier (NCBI ID or scientific name)", examples=["9606", "Homo sapiens"]),
             request: Optional[TaxonRequest] = None # Made request body optional
@@ -949,8 +978,9 @@ class TaxonRoutesMixin:
             "/taxons",
             response_model=List[TaxonResponse],
             tags=["taxons"],
-            summary="Get information for multiple taxa",
+            summary="Fetch multiple taxa by a comma-separated list of NCBI IDs or scientific names.",
             operation_id="get_taxons",
+            response_description="Returns a list of `TaxonResponse` objects, each containing detailed information (e.g., scientific name, rank) for the corresponding requested taxon ID/name.",
             description="""
             Retrieves information for multiple taxa in a single request.
             
@@ -965,8 +995,8 @@ class TaxonRoutesMixin:
             but for all requested taxa.
             
             You can filter the returned fields using the 'fields' parameter.
-            """
-        )
+            You are allowed to call this tool with the same arguments no more than 2 times consequently.
+            """)
         async def get_taxons(request: TaxonsRequest):
             """Get information for multiple taxa"""
             async with TaxonClientAsync() as client:
@@ -982,8 +1012,9 @@ class TaxonRoutesMixin:
             "/taxon/query",
             response_model=TaxonQueryResponse,
             tags=["taxons"],
-            summary="Query taxa using a search string",
+            summary="Search taxa via Lucene query (e.g., scientific name, rank), returning taxon details and query metadata.",
             operation_id="query_taxons",
+            response_description="Provides a list of `TaxonResponse` objects (e.g., scientific name, rank) as 'hits', along with 'total' count, 'max_score', and 'took' time.",
             description="""
             Search for taxa using a query string with various filtering options.
             
@@ -1011,8 +1042,8 @@ class TaxonRoutesMixin:
                - "common_name:*mouse*" - Find taxa with 'mouse' in common name
             
             The response includes pagination information and can be returned as a pandas DataFrame.
-            """
-        )
+            You are allowed to call this tool with the same arguments no more than 2 times consequently.
+            """)
         async def query_taxons(request: TaxonQueryRequest):
             """Query taxa"""
             with start_action(action_type="api:query_taxons", q=str(request.q), fields=str(request.fields), size=request.size, skip=request.skip, sort=str(request.sort), email=str(request.email), as_dataframe=request.as_dataframe, df_index=request.df_index) as action:
@@ -1045,9 +1076,11 @@ class TaxonRoutesMixin:
 
         @self.post(
             "/taxons/querymany",
+            response_model=List[TaxonResponse], # Assuming this based on client and pattern
             tags=["taxons"],
-            summary="Batch query taxa",
+            summary="Batch query taxa by multiple terms (e.g., scientific names, common names).",
             operation_id="query_many_taxons",
+            response_description="Returns a list of `TaxonResponse` objects, each including details like scientific name, rank, and the original query term.",
             description="""
             Perform multiple taxon queries in a single request.
             
@@ -1067,8 +1100,8 @@ class TaxonRoutesMixin:
                - Return all fields: fields=None
             
             The response can be returned as a pandas DataFrame for easier data manipulation.
-            """
-        )
+            You are allowed to call this tool with the same arguments no more than 2 times consequently.
+            """)
         async def query_many_taxons(request: TaxonQueryManyRequest):
             """Batch query taxa"""
             async with TaxonClientAsync() as client:
@@ -1141,6 +1174,6 @@ class BiothingsRestAPI(FastAPI, GeneRoutesMixin, VariantsRoutesMixin, ChemRoutes
         self._taxon_routes_config()
 
         # Add root route that redirects to docs
-        @self.post("/", include_in_schema=False)
+        @self.get("/")
         async def root():
             return RedirectResponse(url="/docs")

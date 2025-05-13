@@ -10,7 +10,7 @@ RUN uv sync
 RUN uv run pytest -vvv
 
 # Expose the port the app runs on (adjust if your server runs on a different port)
-EXPOSE 3001
+EXPOSE 8000
 
 # Define the command to run the application
 CMD ["uv", "run", "server"] 

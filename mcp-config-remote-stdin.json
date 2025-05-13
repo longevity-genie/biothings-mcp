@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "biothings-mcp-stdin": {
+        "command": "uvx mcp-proxy",
+        "args": ["https://biothings.longevity-genie.info/mcp/"],
+        "env": {
+          "API_ACCESS_TOKEN": "access-token"
+        }
+    }
+  }
+}

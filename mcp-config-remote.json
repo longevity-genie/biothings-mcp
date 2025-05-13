@@ -1,8 +1,10 @@
 {
   "mcpServers": {
     "biothings-mcp": {
-      "type": "sse",
-      "url": "https://biothings.longevity-genie.info/mcp"
+      "url": "https://biothings.longevity-genie.info/mcp",
+      "env": {
+        "API_ACCESS_TOKEN": "access-token"
+      }
     }
   }
 }
