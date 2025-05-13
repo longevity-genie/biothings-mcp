@@ -2,6 +2,7 @@
   "mcpServers": {
     "biothings-mcp": {
       "url": "https://biothings.longevity-genie.info/mcp",
+      "type": "streamable-http",
       "env": {
         "API_ACCESS_TOKEN": "access-token"
       }

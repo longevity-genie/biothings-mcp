@@ -1,20 +1,16 @@
-from pathlib import Path
-from typing import Optional, List, Dict, Any, Union, Literal, Callable, TypeVar, Sequence, Generic, Type, cast
-import json
-import os
+from typing import Optional, List, Dict, Any, Union
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ConfigDict
 
-from fastapi import FastAPI, Query, Path as FastApiPath, HTTPException
-from fastapi.responses import RedirectResponse, JSONResponse
-from starlette.responses import PlainTextResponse
-from concurrent.futures import ThreadPoolExecutor
-from biothings_typed_client.genes import GeneClientAsync, GeneResponse, GeneClient
-from biothings_typed_client.variants import VariantClientAsync, VariantResponse, VariantClient
-from biothings_typed_client.chem import ChemClientAsync, ChemResponse, ChemClient
-from biothings_typed_client.taxons import TaxonClientAsync, TaxonResponse, TaxonClient
-from eliot import start_action, to_file, Action, write_traceback
+from fastapi import FastAPI, Path as FastApiPath, HTTPException
+from fastapi.responses import RedirectResponse
+from biothings_typed_client.genes import GeneClientAsync, GeneResponse
+from biothings_typed_client.variants import VariantClientAsync, VariantResponse
+from biothings_typed_client.chem import ChemClientAsync, ChemResponse
+from biothings_typed_client.taxons import TaxonClientAsync, TaxonResponse
+from biothings_mcp.download_api import DownloadsMixin
+from eliot import start_action
 
 # Custom TaxonResponse model making version field optional
 class TaxonResponse(TaxonResponse):
@@ -1114,7 +1110,7 @@ class TaxonRoutesMixin:
                     df_index=request.df_index
                 )
             
-class BiothingsRestAPI(FastAPI, GeneRoutesMixin, VariantsRoutesMixin, ChemRoutesMixin, TaxonRoutesMixin):
+class BiothingsRestAPI(FastAPI, GeneRoutesMixin, VariantsRoutesMixin, ChemRoutesMixin, TaxonRoutesMixin, DownloadsMixin):
     """FastAPI implementation providing OpenAI-compatible endpoints for Just-Agents.
     This class extends FastAPI to provide endpoints that mimic OpenAI's API structure,
     allowing Just-Agents to be used as a drop-in replacement for OpenAI's API.
@@ -1172,6 +1168,7 @@ class BiothingsRestAPI(FastAPI, GeneRoutesMixin, VariantsRoutesMixin, ChemRoutes
         self._variants_routes_config()
         self._chem_routes_config()
         self._taxon_routes_config()
+        self._download_routes_config()
 
         # Add root route that redirects to docs
         @self.get("/")
