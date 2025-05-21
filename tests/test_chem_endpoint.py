@@ -3,7 +3,6 @@ from fastapi.testclient import TestClient
 from biothings_mcp.server import create_app
 from biothings_typed_client.chem import ChemResponse # Import ChemResponse
 from pathlib import Path
-from pycomfort.logging import to_nice_stdout, to_nice_file
 import logging
 
 logger = logging.getLogger(__name__)
@@ -15,11 +14,7 @@ def client():
     project_root = Path(__file__).resolve().parents[1]
     log_dir = project_root / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    json_log_path = log_dir / "test_chem_endpoints.log.json"
-    rendered_log_path = log_dir / "test_chem_endpoints.log"
-    # to_nice_file(output_file=json_log_path, rendered_file=rendered_log_path)
-    to_nice_stdout()
-
+    
     app = create_app()
     return TestClient(app)
 

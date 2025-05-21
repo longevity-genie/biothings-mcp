@@ -99,7 +99,7 @@ caching = [
 
 [[package]]
 name = "biothings-mcp"
-version = "0.0.6"
+version = "0.0.7"
 source = { editable = "." }
 dependencies = [
     { name = "biopython" },
@@ -121,8 +121,8 @@ requires-dist = [
     { name = "biopython", specifier = ">=1.85" },
     { name = "biothings-typed-client", specifier = ">=0.0.4" },
     { name = "eliot", specifier = ">=1.17.5" },
-    { name = "fastapi-mcp", specifier = ">=0.3.3" },
-    { name = "fastmcp", specifier = ">=2.3.3" },
+    { name = "fastapi-mcp", specifier = ">=0.3.4" },
+    { name = "fastmcp", specifier = ">=2.3.5" },
     { name = "pycomfort", specifier = ">=0.0.18" },
 ]
 
@@ -347,7 +347,7 @@ wheels = [
 
 [[package]]
 name = "fastapi-mcp"
-version = "0.3.3"
+version = "0.3.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastapi" },
@@ -361,14 +361,14 @@ dependencies = [
     { name = "typer" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/06/31/995f7f3ad9908d876f731015f8782074f046ae2159a0a8e16e8accbe0f64/fastapi_mcp-0.3.3.tar.gz", hash = "sha256:29da90e10ae4f661d6bd071fd1233553ef6be7fe3b9efe47d20611aa6cd42da2", size = 105039, upload_time = "2025-04-23T09:03:32.894Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/73/93/f0cc88f6ec51ce9c92570d097c3e94a6fe5c98cf9f372504456fc29cb33c/fastapi_mcp-0.3.4.tar.gz", hash = "sha256:2a83dde5b249cfa6276f0ee90958387bb8c9c430f1a6213f559ead757dfe18b2", size = 164950, upload_time = "2025-05-18T14:29:36.059Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c2/ce/b390b58b6025c40270a13f86a9ea48446d75bff529eb699017014e49ac09/fastapi_mcp-0.3.3-py3-none-any.whl", hash = "sha256:246570660c318692b863522a6d9d2458f4c4cf6cebbfbe778fecbd49de13112a", size = 23182, upload_time = "2025-04-23T09:03:31.985Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/4e/63e2ae715135406b0d3c74c301743f470888740bd4ed0ebd170a8f005ca3/fastapi_mcp-0.3.4-py3-none-any.whl", hash = "sha256:b2bcddd0514201c6434b970263f8f4e9e8e1f494ea93fdc0de251e19337e19cf", size = 22928, upload_time = "2025-05-18T14:29:34.677Z" },
 ]
 
 [[package]]
 name = "fastmcp"
-version = "2.3.3"
+version = "2.3.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "exceptiongroup" },
@@ -380,9 +380,9 @@ dependencies = [
     { name = "typer" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ef/78/fd9f82886ecf04826ed3f5bbfe8c5e400ba77d2cee66258f8a19e3ea01c8/fastmcp-2.3.3.tar.gz", hash = "sha256:f13f87e180158e8176074c2a39a363bfd1ad4283a259377463c81c7735619106", size = 990228, upload_time = "2025-05-10T20:16:56.724Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/61/30/1a70fce24dd0c9f7e7e2168adad1eb2c126e918128594a7bba06093b9263/fastmcp-2.3.5.tar.gz", hash = "sha256:09e11723c6588d8c13562d5eb04d42b13b91eb32f53cef77cc8c0ee121b2f907", size = 1004996, upload_time = "2025-05-20T14:53:10.422Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d3/25/d49eb31b653f8f6fcd496e5abaedef9bdd5b71fac102cb9220d5df4d016e/fastmcp-2.3.3-py3-none-any.whl", hash = "sha256:c4dcd809f4e058aea3fd158952ff51294f2392871de3a870183d61cde032787f", size = 92749, upload_time = "2025-05-10T20:16:55.227Z" },
+    { url = "https://files.pythonhosted.org/packages/d6/0f/098a4c7891d8c6adb69fc4f421e879bed73a352b3c3562b6a0be989b29bd/fastmcp-2.3.5-py3-none-any.whl", hash = "sha256:193e35a8d35a5c6a4af07e764873d8592aadc2f1e32dd8827b57869a83956088", size = 97240, upload_time = "2025-05-20T14:53:09.32Z" },
 ]
 
 [[package]]
@@ -599,7 +599,7 @@ wheels = [
 
 [[package]]
 name = "mcp"
-version = "1.8.0"
+version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -612,9 +612,9 @@ dependencies = [
     { name = "starlette" },
     { name = "uvicorn", marker = "sys_platform != 'emscripten'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ff/97/0a3e08559557b0ac5799f9fb535fbe5a4e4dcdd66ce9d32e7a74b4d0534d/mcp-1.8.0.tar.gz", hash = "sha256:263dfb700540b726c093f0c3e043f66aded0730d0b51f04eb0a3eb90055fe49b", size = 264641, upload_time = "2025-05-08T20:09:06.255Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/bc/8d/0f4468582e9e97b0a24604b585c651dfd2144300ecffd1c06a680f5c8861/mcp-1.9.0.tar.gz", hash = "sha256:905d8d208baf7e3e71d70c82803b89112e321581bcd2530f9de0fe4103d28749", size = 281432, upload_time = "2025-05-15T18:51:06.615Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b2/b2/4ac3bd17b1fdd65658f18de4eb0c703517ee0b483dc5f56467802a9197e0/mcp-1.8.0-py3-none-any.whl", hash = "sha256:889d9d3b4f12b7da59e7a3933a0acadae1fce498bfcd220defb590aa291a1334", size = 119544, upload_time = "2025-05-08T20:09:04.458Z" },
+    { url = "https://files.pythonhosted.org/packages/a5/d5/22e36c95c83c80eb47c83f231095419cf57cf5cca5416f1c960032074c78/mcp-1.9.0-py3-none-any.whl", hash = "sha256:9dfb89c8c56f742da10a5910a1f64b0d2ac2c3ed2bd572ddb1cfab7f35957178", size = 125082, upload_time = "2025-05-15T18:51:04.916Z" },
 ]
 
 [[package]]

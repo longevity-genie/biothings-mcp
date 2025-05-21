@@ -1,7 +1,7 @@
 [project]
 name = "biothings-mcp"
-version = "0.0.6"
-description = "Add your description here"
+version = "0.0.7"
+description = "MCP for Biothings"
 readme = "README.md"
 authors = [
     { name = "antonkulaga", email = "antonkulaga@gmail.com" }
@@ -12,8 +12,8 @@ dependencies = [
     "biothings-typed-client>=0.0.4",
     "eliot>=1.17.5",
     "pycomfort>=0.0.18",
-    "fastapi-mcp>=0.3.3",
-    "fastmcp>=2.3.3"
+    "fastapi-mcp>=0.3.4",
+    "fastmcp>=2.3.5"
 ]
 
 [project.scripts]

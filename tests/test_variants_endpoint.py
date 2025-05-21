@@ -4,7 +4,6 @@ from fastapi.testclient import TestClient
 from biothings_mcp.server import create_app
 from biothings_typed_client.variants import VariantResponse
 from pathlib import Path
-from pycomfort.logging import to_nice_stdout, to_nice_file
 import logging
 
 logger = logging.getLogger(__name__)
@@ -18,16 +17,6 @@ def client():
     project_root = Path(__file__).resolve().parents[1]  # Project root is one level up from tests dir
     log_dir = project_root / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)  # Ensure the directory exists
-
-    # Define log file paths for tests
-    json_log_path = log_dir / "test_variants_endpoints.log.json"
-    rendered_log_path = log_dir / "test_variants_endpoints.log"
-
-    # Comment out file logging if causing issues in CI/local env
-    # to_nice_stdout()
-    # to_nice_file(output_file=json_log_path, rendered_file=rendered_log_path)
-    to_nice_stdout() # Keep stdout logging
-
     app = create_app()
     return TestClient(app)
 
@@ -132,7 +121,7 @@ def test_query_many_variants_endpoint(client):
     data = response.json()
     assert len(data) == 2
     # Check that we got results for both queries by checking IDs or other unique fields
-    ids = {result.get("_id") for result in data if result and "_id" in result}
+    ids = {result.get("id") for result in data if result and "id" in result}
     # The exact IDs might vary depending on the backend data, but we expect two distinct results
     assert len(ids) == 2
     # Example check for rsid if available in response (fields might need adjustment)

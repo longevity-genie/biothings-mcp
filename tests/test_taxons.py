@@ -1,9 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
 from biothings_mcp.server import create_app
-from biothings_typed_client.taxons import TaxonResponse # Import TaxonResponse
+from biothings_typed_client.taxons import TaxonResponse
 from pathlib import Path
-from pycomfort.logging import to_nice_stdout, to_nice_file
 import logging
 
 logger = logging.getLogger(__name__)
@@ -18,10 +17,6 @@ def client():
     project_root = Path(__file__).resolve().parents[1]
     log_dir = project_root / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    json_log_path = log_dir / "test_taxon_endpoints.log.json"
-    rendered_log_path = log_dir / "test_taxon_endpoints.log"
-    # to_nice_file(output_file=json_log_path, rendered_file=rendered_log_path)
-    to_nice_stdout()
 
     app = create_app()
     return TestClient(app)
@@ -31,7 +26,7 @@ def test_get_taxon_endpoint(client):
     response = client.post(f"/taxon/{HUMAN_TAXID}", json={})
     assert response.status_code == 200
     data = response.json()
-    assert data["id"] == str(HUMAN_TAXID)
+    assert data["_id"] == str(HUMAN_TAXID)
     assert data["taxid"] == HUMAN_TAXID
     # Expect lowercase from API
     assert data["scientific_name"] == "homo sapiens"
@@ -42,7 +37,7 @@ def test_get_taxon_with_fields_endpoint(client):
     response = client.post(f"/taxon/{HUMAN_TAXID}", json={"fields": fields})
     assert response.status_code == 200
     data = response.json()
-    assert data["id"] == str(HUMAN_TAXID) # ID should still be present
+    assert data["_id"] == str(HUMAN_TAXID)
     assert "scientific_name" in data
     assert "rank" in data
     # Expect lowercase from API
@@ -80,7 +75,8 @@ def test_get_taxon_with_fields_endpoint(client):
 
 def test_query_many_taxons_endpoint(client):
     """Test the /taxons/querymany endpoint."""
-    query_list = f"{HUMAN_TAXID},{MOUSE_TAXID}"
+    query_list = f"{HUMAN_TAXID},{MOUSE_TAXID}" # Revert to comma-separated string
+    # query_list = [HUMAN_TAXID, MOUSE_TAXID] # This caused a 422 error
     scopes = "taxid" # Query by taxid
     # Make sure JSON body has the right structure
     response = client.post("/taxons/querymany", json={

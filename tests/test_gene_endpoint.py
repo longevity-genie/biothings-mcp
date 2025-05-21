@@ -4,7 +4,6 @@ from fastapi.testclient import TestClient
 from biothings_mcp.server import create_app
 from biothings_typed_client.genes import GeneResponse
 from pathlib import Path
-from pycomfort.logging import to_nice_stdout, to_nice_file
 
 @pytest.fixture
 def client():
@@ -18,13 +17,6 @@ def client():
     project_root = Path(__file__).resolve().parents[1]  # Project root is one level up from tests dir
     log_dir = project_root / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)  # Ensure the directory exists
-
-    # Define log file paths for tests
-    json_log_path = log_dir / "test_gene_endpoints.log.json"
-    rendered_log_path = log_dir / "test_gene_endpoints.log"
-
-    to_nice_stdout()
-    to_nice_file(output_file=json_log_path, rendered_file=rendered_log_path)
 
     app = create_app()
     return TestClient(app)

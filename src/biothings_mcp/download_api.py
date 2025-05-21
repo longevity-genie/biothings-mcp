@@ -2,7 +2,7 @@ import os
 from Bio import Entrez, SeqIO
 from Bio.Align import PairwiseAligner
 from Bio.Seq import Seq
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from pathlib import Path
 from typing import Literal, List, Dict, Optional
 from fastapi import HTTPException
@@ -44,8 +44,8 @@ class PairwiseAlignmentRequest(BaseModel):
     extend_gap_penalty: float = Field(-0.1, description="Penalty for extending a gap. Should be negative or zero.")
     mode: Literal["global", "local"] = Field("global", description="Alignment mode: 'global' or 'local'.")
 
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra = {
             "example": {
                 "sequence1": "GATTACA",
                 "sequence2": "GCATGCU",
@@ -56,6 +56,7 @@ class PairwiseAlignmentRequest(BaseModel):
                 "mode": "global"
             }
         }
+    )
 
 class PairwiseAlignmentResponse(BaseModel):
     score: float
@@ -152,7 +153,7 @@ class DownloadsMixin:
             You can specify sequences and alignment scoring parameters.
             """
         )
-        def pairwise_alignment_route(self, request: PairwiseAlignmentRequest):
+        def pairwise_alignment_route(request: PairwiseAlignmentRequest):
             try:
                 response = run_pairwise_alignment(request)
                 return response

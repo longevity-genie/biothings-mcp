@@ -1,4 +1,9 @@
+import logging
 from typing import Optional, List, Dict, Any, Union
+
+# Setup logger for this module
+logger = logging.getLogger(__name__)
+# logger.setLevel(logging.DEBUG) # Optional: set level
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ConfigDict
@@ -8,18 +13,19 @@ from fastapi.responses import RedirectResponse
 from biothings_typed_client.genes import GeneClientAsync, GeneResponse
 from biothings_typed_client.variants import VariantClientAsync, VariantResponse
 from biothings_typed_client.chem import ChemClientAsync, ChemResponse
-from biothings_typed_client.taxons import TaxonClientAsync, TaxonResponse
+from biothings_typed_client.taxons import TaxonClientAsync, TaxonResponse as BaseClientTaxonResponse
 from biothings_mcp.download_api import DownloadsMixin
 from eliot import start_action
 
 # Custom TaxonResponse model making version field optional
-class TaxonResponse(TaxonResponse):
+class TaxonResponse(BaseClientTaxonResponse):
     """Response model for taxon information with version field as optional"""
     model_config = ConfigDict(extra='allow')
     
-    # Override id and version fields to handle field validation properly
-    id: str = Field(..., description="Taxon identifier", validation_alias='_id', serialization_alias='id')
-    version: Optional[int] = Field(default=1, description="Version number", validation_alias='_version', serialization_alias='version')
+    # Override parent's fields to set new serialization_alias and modify type (for version)
+    # Also ensure validation_alias is present for input mapping
+    id: str = Field(validation_alias='_id', serialization_alias='_id', description="Taxon identifier")
+    version: Optional[int] = Field(default=1, validation_alias='_version', serialization_alias='_version', description="Version number")
 
 # Request Body Models
 
@@ -968,7 +974,8 @@ class TaxonRoutesMixin:
                 )
                 if result is None:
                     raise HTTPException(status_code=404, detail=f"Taxon '{taxon_id}' not found")
-                return result
+                # Convert to the local TaxonResponse model to ensure correct serialization
+                return TaxonResponse.model_validate(result.model_dump(by_alias=True))
 
         @self.post(
             "/taxons",
@@ -996,13 +1003,15 @@ class TaxonRoutesMixin:
         async def get_taxons(request: TaxonsRequest):
             """Get information for multiple taxa"""
             async with TaxonClientAsync() as client:
-                return await client.gettaxons(
+                results_from_client = await client.gettaxons(
                     request.taxon_ids.split(","),
                     fields=request.fields.split(",") if request.fields else None,
                     email=request.email,
                     as_dataframe=request.as_dataframe,
                     df_index=request.df_index
                 )
+                # Convert each item to the local TaxonResponse model
+                return [TaxonResponse.model_validate(item.model_dump(by_alias=True)) for item in results_from_client]
 
         @self.post(
             "/taxon/query",
@@ -1099,16 +1108,34 @@ class TaxonRoutesMixin:
             You are allowed to call this tool with the same arguments no more than 2 times consequently.
             """)
         async def query_many_taxons(request: TaxonQueryManyRequest):
-            """Batch query taxa"""
-            async with TaxonClientAsync() as client:
-                return await client.querymany(
-                    request.query_list.split(","),
-                    scopes=request.scopes.split(",") if request.scopes else None,
-                    fields=request.fields.split(",") if request.fields else None,
-                    email=request.email,
-                    as_dataframe=request.as_dataframe,
-                    df_index=request.df_index
+            with start_action(action_type="query_many_taxons", query_list=request.query_list, scopes=request.scopes):
+                fields_list = request.fields.split(',') if request.fields else None
+                scopes_list = request.scopes.split(',') if request.scopes else None
+                
+                # Ensure self.taxon_client is used (it's part of the BiothingsRestAPI class)
+                raw_results = await self.taxon_client.querymany(
+                    request.query_list.split(','),
+                    scopes=scopes_list, 
+                    fields=fields_list
+                    # returnall=True # Removed, defaults to False
                 )
+                # Process results when returnall=False (default)
+                # Each item in raw_results should be a dict containing the query and the result,
+                # or a 'notfound' marker.
+                results = []
+                if isinstance(raw_results, list):
+                    for item in raw_results:
+                        if isinstance(item, dict) and not item.get('notfound'):
+                            # Assuming 'item' is the actual taxon document if found
+                            try:
+                                # Use the TaxonResponse defined in this file, which handles _id and _version aliases
+                                results.append(TaxonResponse.model_validate(item))
+                            except Exception as e:
+                                logger.warning(f"Failed to validate taxon item: {item}, error: {e}")
+                
+                logger.info(f"query_many_taxons raw_results: {raw_results}") 
+                logger.info(f"query_many_taxons processed results: {results}") 
+                return results
             
 class BiothingsRestAPI(FastAPI, GeneRoutesMixin, VariantsRoutesMixin, ChemRoutesMixin, TaxonRoutesMixin, DownloadsMixin):
     """FastAPI implementation providing OpenAI-compatible endpoints for Just-Agents.
@@ -1174,3 +1201,9 @@ class BiothingsRestAPI(FastAPI, GeneRoutesMixin, VariantsRoutesMixin, ChemRoutes
         @self.get("/")
         async def root():
             return RedirectResponse(url="/docs")
+
+        self.gene_client = GeneClientAsync()
+        self.variant_client = VariantClientAsync()
+        self.chem_client = ChemClientAsync()
+        self.taxon_client = TaxonClientAsync()
+        logger.info(f"BiothingsRestAPI initialized. taxon_client is set: {hasattr(self, 'taxon_client')}")
