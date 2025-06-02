@@ -1,7 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
 from biothings_mcp.server import create_app
-from biothings_typed_client.taxons import TaxonResponse
 from pathlib import Path
 import logging
 

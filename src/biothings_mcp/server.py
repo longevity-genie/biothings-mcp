@@ -1,26 +1,19 @@
 from functools import partial
 import os
 from pathlib import Path
-from typing import Literal, Optional, List, Dict, Any, Union, Type, ClassVar
-import asyncio
 from enum import Enum
 
 import anyio
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi_mcp import FastApiMCP
-import httpx
 import typer
 from typing_extensions import Annotated
 
 from biothings_mcp.biothings_api import BiothingsRestAPI
 from pycomfort.logging import to_nice_stdout, to_nice_file
 from fastmcp import FastMCP
-from fastmcp.server.openapi import FastMCPOpenAPI
 
-import uvicorn
-from eliot import start_task
 # from biothings_mcp.logging import configure_logging, LoggedTask, log_info
 
 class TransportType(str, Enum):
@@ -72,7 +65,7 @@ def run_server(
         raise typer.Exit(1)
         
     app = create_app()
-    mcp = FastMCP.from_fastapi(app=app)
+    mcp = FastMCP.from_fastapi(app=app, port=DEFAULT_PORT)
 
     # Manually add routes from the original FastAPI app to FastMCP's additional routes
     if mcp._additional_http_routes is None:

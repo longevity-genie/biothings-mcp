@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from biothings_mcp.server import create_app
-from biothings_typed_client.chem import ChemResponse # Import ChemResponse
+from biothings_typed_client.chem import ChemResponse
 from pathlib import Path
 import logging
 

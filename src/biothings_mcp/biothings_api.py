@@ -224,6 +224,8 @@ class GeneRoutesMixin:
             Use this endpoint when you need to *search* for genes based on criteria, not when you already know the specific gene ID.
             If you know the exact Entrez or Ensembl ID, use the `/gene/{gene_id}` endpoint instead for faster retrieval.
             If you only need general database information (like available fields or total gene count), use the `/gene/metadata` endpoint.
+            It does not give exact sequences of the gene but gives ids of genomic, protein and rna sequences which you can download with other tools (like download_entrez_data). If you use those ids in downloads you must alway check whether user wants protein, dna or rna sequence (clarify if not clear)
+            It does not give exact variants but you have tool for variants resolution based on this gene ids
 
             **Supported Query Features (based on Lucene syntax):**
             1. Simple Term Queries:
@@ -325,6 +327,8 @@ class GeneRoutesMixin:
             
             **Result Interpretation:**
             - The response is a list of matching gene objects.
+            - It does not give exact sequences of the gene but gives ids of genomic, protein and rna sequences which you can download with other tools (like download_entrez_data). If you use those ids in downloads you must alway check whether user wants protein, dna or rna sequence (clarify if not clear)
+            - It does not give exact variants but you have tool for variants resolution based on this gene ids
             - Each object includes a `query` field indicating which term from the `query_list` it matched.
             - A single term from `query_list` might match multiple genes (e.g., a symbol matching genes in different species if `species` is not set, or matching multiple retired IDs).
             - Terms with no matches are **omitted** from the response list (unlike the POST endpoint which returns a `notfound` entry).

@@ -107,7 +107,7 @@ Here's an example of how the tools might appear in an MCP client like Cursor aft
 
 ## KNOWN ISSUES
 
-The library is alpha-quality. The major problem right now is that LLM-s are often stupid and do not know how to put valid gene and gene variant symbols. We plan to mitigrate it by extending comments and providing additional method for entetity resolution.
+The library is beta-quality. The major problem right now is that LLM-s are often stupid and do not know how to put valid gene and gene variant symbols. We plan to mitigrate it by extending comments and providing additional method for entity resolution.
 
 ## Testing & Verification
 
@@ -121,12 +121,12 @@ Test your MCP setup with the MCP Inspector.
 If you have local server running it will be:
 
 ```bash
-npx @modelcontextprotocol/inspector --config mcp-config-remote.json --server biothings-mcp
+npx @modelcontextprotocol/inspector --config mcp-config.json --server biothings-mcp
 ```
 if you want to try our remote server you should use:
 
 ```bash
-npx @modelcontextprotocol/inspector --config mcp-config.json --server biothings-mcp
+npx @modelcontextprotocol/inspector --config mcp-config-remote.json --server biothings-mcp
 ```
 
 After that you can explore its methods with MCP Inspector at http://127.0.0.1:6274

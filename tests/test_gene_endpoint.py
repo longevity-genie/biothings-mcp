@@ -1,8 +1,6 @@
 import pytest
-import pytest_asyncio
 from fastapi.testclient import TestClient
 from biothings_mcp.server import create_app
-from biothings_typed_client.genes import GeneResponse
 from pathlib import Path
 
 @pytest.fixture

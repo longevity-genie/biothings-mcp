@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "biothings-mcp": {
-      "url": "http://localhost:8000/mcp",
+      "url": "http://localhost:3001/mcp",
       "type": "streamable-http",
       "env": {
         "API_ACCESS_TOKEN": "access-token"
