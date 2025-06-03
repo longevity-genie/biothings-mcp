@@ -1116,13 +1116,14 @@ class TaxonRoutesMixin:
                 fields_list = request.fields.split(',') if request.fields else None
                 scopes_list = request.scopes.split(',') if request.scopes else None
                 
-                # Ensure self.taxon_client is used (it's part of the BiothingsRestAPI class)
-                raw_results = await self.taxon_client.querymany(
-                    request.query_list.split(','),
-                    scopes=scopes_list, 
-                    fields=fields_list
-                    # returnall=True # Removed, defaults to False
-                )
+                # Use the same pattern as other taxon endpoints
+                async with TaxonClientAsync() as client:
+                    raw_results = await client.querymany(
+                        request.query_list.split(','),
+                        scopes=scopes_list, 
+                        fields=fields_list
+                        # returnall=True # Removed, defaults to False
+                    )
                 # Process results when returnall=False (default)
                 # Each item in raw_results should be a dict containing the query and the result,
                 # or a 'notfound' marker.
@@ -1194,6 +1195,7 @@ class BiothingsRestAPI(FastAPI, GeneRoutesMixin, VariantsRoutesMixin, ChemRoutes
             license_info=license_info
         )
         load_dotenv(override=True)
+
         # Initialize routes
         self._gene_routes_config()
         self._variants_routes_config()
@@ -1205,9 +1207,3 @@ class BiothingsRestAPI(FastAPI, GeneRoutesMixin, VariantsRoutesMixin, ChemRoutes
         @self.get("/")
         async def root():
             return RedirectResponse(url="/docs")
-
-        self.gene_client = GeneClientAsync()
-        self.variant_client = VariantClientAsync()
-        self.chem_client = ChemClientAsync()
-        self.taxon_client = TaxonClientAsync()
-        logger.info(f"BiothingsRestAPI initialized. taxon_client is set: {hasattr(self, 'taxon_client')}")

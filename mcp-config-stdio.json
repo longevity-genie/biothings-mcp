@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "biothings-mcp": {
+      "command": "uvx",
+      "args": ["--from", "biothings-mcp", "stdio"],
+      "env": {}
+    }
+  }
+}

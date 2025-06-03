@@ -1,6 +1,6 @@
 [project]
 name = "biothings-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "MCP for Biothings"
 readme = "README.md"
 authors = [
@@ -9,15 +9,18 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "biopython>=1.85",
-    "biothings-typed-client>=0.0.4",
+    "biothings-typed-client>=0.0.5",
     "eliot>=1.17.5",
     "pycomfort>=0.0.18",
-    "fastmcp>=2.5.2",
+    "fastmcp>=2.6.1",
     "fastapi>=0.115.12",
 ]
 
 [project.scripts]
+biothings-mcp = "biothings_mcp.server:cli_app_stdio"
 server = "biothings_mcp.server:cli_app"
+stdio = "biothings_mcp.server:cli_app_stdio"
+sse = "biothings_mcp.server:cli_app_sse"
 
 [build-system]
 requires = ["hatchling"]

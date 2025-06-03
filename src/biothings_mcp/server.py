@@ -52,6 +52,22 @@ def create_app() -> FastAPI:
 
 cli_app = typer.Typer(help="Biothings MCP Server CLI")
 
+def cli_app_stdio():
+    """CLI app with stdio transport as default"""
+    import sys
+    # If no transport argument is provided, add stdio as default
+    if not any(arg.startswith('--transport') for arg in sys.argv[1:]):
+        sys.argv.extend(['--transport', 'stdio'])
+    cli_app()
+    
+def cli_app_sse():
+    """CLI app that forces SSE transport"""
+    import sys
+    # Remove any existing transport arguments and force sse
+    sys.argv = [arg for arg in sys.argv if not arg.startswith('--transport')]
+    sys.argv.extend(['--transport', 'sse'])
+    cli_app()
+
 @cli_app.command()
 def run_server(
     host: Annotated[str, typer.Option(help="Host to run the server on.")] = DEFAULT_HOST,
@@ -78,7 +94,11 @@ def run_server(
         # but for now, let's try adding all of them.
         mcp._additional_http_routes.append(route)
 
-    anyio.run(partial(mcp.run_async, transport=transport, host=host, port=port))
+    # Different transports need different arguments
+    if transport == "stdio":
+        anyio.run(partial(mcp.run_async, transport=transport))
+    else:
+        anyio.run(partial(mcp.run_async, transport=transport, host=host, port=port))
 
 
 if __name__ == "__main__":

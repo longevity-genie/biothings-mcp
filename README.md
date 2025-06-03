@@ -10,6 +10,9 @@ This server implements the Model Context Protocol (MCP) for BioThings, providing
 - [myvariant.info](https://myvariant.info) — Variant annotation and query service
 - [mychem.info](https://mychem.info) — Chemical compound annotation and query service
 
+If you want to understand more what is Model Context Protocol and how to use it more efficiently you can take [DeepLearning AI Course](https://www.deeplearning.ai/short-courses/mcp-build-rich-context-ai-apps-with-anthropic/) or just search for MCP videos on YouTube.
+
+
 ## About MCP (Model Context Protocol)
 
 MCP is a protocol that bridges the gap between AI systems and specialized domain knowledge. It enables:
@@ -38,9 +41,79 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Verify installation
 uv --version
+uvx --version
 ```
 
-### Setup
+uvx is a very nice tool that can run a python package installing it if needed.
+
+### Running with uvx
+
+You can run the biothings-mcp server directly using uvx without cloning the repository:
+
+#### STDIO Mode (for MCP clients that require stdio, can be useful when you want to save files)
+```bash
+# Run the server in STDIO mode (default mode)
+uvx biothings-mcp
+
+# Or explicitly specify stdio mode
+uvx --from biothings-mcp stdio
+```
+
+#### HTTP Mode (Web Server)
+```bash
+# Run the server in streamable HTTP mode on default ( 3001 ) port
+uvx biothings-mcp
+
+# Run on a specific port
+uvx biothings-mcp server --port 8000
+```
+
+#### SSE Mode (Server-Sent Events)
+```bash
+# Run the server in SSE mode
+uvx biothings-mcp sse
+```
+
+The HTTP mode will start a web server that you can access at `http://localhost:3001/mcp` (with documentation at `http://localhost:3001/docs`). The STDIO mode is designed for MCP clients that communicate via standard input/output, while SSE mode uses Server-Sent Events for real-time communication.
+
+
+## Configuring your (Anthropic Claude Desktop, Cursor, Windsurf, etc.)
+
+We provide stdio configuration using the proxy (might need npx to run):
+* mcp-config-remote.json - for remote configuration
+* mcp-config-stdio.json - stdio configuration for localhost for MCP clients which do not support 
+
+
+### Inspecting Biothings MCP server
+
+If you want to inspect the methods provided by the MCP use npx (you may need to install nodejs and npm)
+
+Test your MCP setup with the MCP Inspector.
+
+If you want to inspect local streamable-http server you use:
+
+```bash
+npx @modelcontextprotocol/inspector --config mcp-config.json --server biothings-mcp
+```
+
+Add -remote suffix for the remote server.
+
+
+If you want to inspect stdio local server you should use
+
+```bash
+npx @modelcontextprotocol/inspector --config mcp-config-stdio.json --server biothings-mcp
+```
+
+You can also run inspector manually and put server parameters in the interface:
+```
+npx @modelcontextprotocol/inspector
+```
+
+After that you can explore its methods with MCP Inspector at http://127.0.0.1:6274
+
+
+## Repository setup
 
 ```bash
 # Clone the repository
@@ -51,46 +124,13 @@ uv sync
 
 ### Running the MCP Server
 
+If you already cloned the repo you can run the server with uv
+
 ```bash
 # Start the MCP server locally
 uv run server
 ```
 
-### Docker Deployment
-
-The easiest way to run the MCP server is using Docker. The project provides a pre-built Docker image available on GitHub Container Registry.
-
-1. Using Docker Compose (recommended):
-
-```bash
-# Clone the repository
-git clone git@github.com:longevity-genie/biothings-mcp.git
-cd biothings-mcp
-
-# Start the services
-docker-compose up
-```
-
-This will start:
-- The MCP server on port 3001
-- The MCP Inspector on port 5173
-
-
-It is important to know that not all MCP clients support sse, even anthropic desktop 
-
-2. Using Docker directly:
-
-```bash
-# Pull the latest image
-docker pull ghcr.io/longevity-genie/biothings-mcp:latest
-
-# Run the container
-docker run -p 3001:3001 -e MCP_PORT=3001 ghcr.io/longevity-genie/biothings-mcp:latest
-```
-
-The MCP server will be available at `http://localhost:3001/mcp` (with docs at http://localhost:3001/docs).
-
-A publicly hosted version of this server is also available at `https://biothings.longevity-genie.info/mcp` (with docs at https://biothings.longevity-genie.info/docs)
 
 ### Integration with AI Systems
 
@@ -116,21 +156,7 @@ Run tests for the API endpoint:
 uv run pytest -vvv -s
 ```
 
-Test your MCP setup with the MCP Inspector.
-
-If you have local server running it will be:
-
-```bash
-npx @modelcontextprotocol/inspector --config mcp-config.json --server biothings-mcp
-```
-if you want to try our remote server you should use:
-
-```bash
-npx @modelcontextprotocol/inspector --config mcp-config-remote.json --server biothings-mcp
-```
-
-After that you can explore its methods with MCP Inspector at http://127.0.0.1:6274
-
+You can use MCP inspector with locally build MCP server same way as with uvx
 
 *Note: Using the MCP Inspector is optional. Most MCP clients (like Cursor, Windsurv, etc.) will automatically display the available tools from this server once configured. However, the Inspector can be useful for detailed testing and exploration.* 
 
@@ -138,21 +164,6 @@ After that you can explore its methods with MCP Inspector at http://127.0.0.1:62
 
 This opens a web interface where you can explore and test all available tools.
 
-## Bridging for MCP clients that support only STDIO ways:
-
-MCP is a new standard so even its founder, Anthropic does not fully support its specification in thei Claude Desktop. 
-
-For this reasons we also provide stdin versions of MCP
-We provide stdin configuration using the proxy (might need npx to run):
-* mcp-config-remote-stdin.json - for remote configuration
-* mcp-config-local-stdin.json - stdin configuration for localhost for MCP clients which do not support 
-
-For this reason we p
-
-## Configuration files
-
-To configure your MCP client (i.e. Cursor, Windsurf, Claude Desktop, etc.) you have to select copy-paste configuration from the json.
-If you want to call the server locally use
 
 ## Documentation
 
