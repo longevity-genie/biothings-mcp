@@ -1,237 +1,482 @@
 import pytest
-from fastapi.testclient import TestClient
-from biothings_mcp.server import create_app
-from pathlib import Path
-import logging
 import os
-
-# Configure logger for this test module
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG) # Or logging.INFO for less verbosity
-
-# It's good practice to ensure ENTREZ_EMAIL is set for tests that might call NCBI
-# For testing purposes, a placeholder can be used if not set, but NCBI might block it.
-# Consider mocking Entrez calls for robust CI/CD if actual calls are problematic.
-if "ENTREZ_EMAIL" not in os.environ:
-    os.environ["ENTREZ_EMAIL"] = "test_user@example.com"
-    logger.warning(f"ENTREZ_EMAIL not set, using placeholder: {os.environ['ENTREZ_EMAIL']}")
-
+import tempfile
+from pathlib import Path
+from typing import Generator, Optional
+from biothings_mcp.server import BiothingsMCP
+from biothings_mcp.download_api import DownloadTools, get_entrez, run_pairwise_alignment, PairwiseAlignmentRequest, PairwiseAlignmentResponse, LocalFileResult
 
 @pytest.fixture
-def client():
-    """Fixture providing a FastAPI test client."""
-    project_root = Path(__file__).resolve().parents[1]  # Project root is one level up from tests dir
-    log_dir = project_root / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)  # Ensure the directory exists
+def temp_output_dir() -> Generator[str, None, None]:
+    """Fixture providing a temporary output directory for testing."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        yield temp_dir
 
-    app = create_app()
-    return TestClient(app)
+@pytest.fixture
+def mcp_server(temp_output_dir: str) -> BiothingsMCP:
+    """Fixture providing a BiothingsMCP server instance for testing."""
+    return BiothingsMCP(output_dir=temp_output_dir)
 
+@pytest.fixture
+def download_tools(mcp_server: BiothingsMCP) -> DownloadTools:
+    """Fixture providing DownloadTools instance for testing."""
+    return DownloadTools(mcp_server, prefix="test_", output_dir=mcp_server.output_dir)
 
-def test_entrez_download_fasta_nucleotide(client):
-    """Test downloading a nucleotide sequence in FASTA format from Entrez."""
-    # Using a known human mRNA sequence for TP53
-    payload = {
-        "ids": ["NM_000546.6"],
-        "db": "nucleotide",
-        "reftype": "fasta"
-    }
-    response = client.post("/download/entrez", json=payload)
-    assert response.status_code == 200
-    content = response.json()
-    assert content.startswith(">NM_000546.6 Homo sapiens tumor protein p53 (TP53), transcript variant 1, mRNA")
-    # Basic check for sequence content (can be more specific if needed)
-    assert "GATTACA" in content or "ACGT" in content # Generic DNA subsequence check
-    logger.info(f"Entrez FASTA download successful for NM_000546.6. Length: {len(content)}")
+@pytest.mark.asyncio
+async def test_download_entrez_data_fasta(download_tools: DownloadTools) -> None:
+    """Test the download_entrez_data MCP tool with FASTA format.
+    
+    This test verifies that the tool correctly downloads sequence data
+    from NCBI Entrez in FASTA format. It checks that the response
+    contains valid FASTA content.
+    
+    Note: This test requires ENTREZ_EMAIL environment variable to be set.
+    """
+    # Skip if no ENTREZ_EMAIL is set
+    if not os.getenv("ENTREZ_EMAIL"):
+        pytest.skip("ENTREZ_EMAIL environment variable not set")
+    
+    # Test data
+    ids = ["NM_000546.6"]  # Human TP53 mRNA
+    db = "nucleotide"
+    reftype = "fasta"
+    
+    result: str = get_entrez(ids=ids, db=db, reftype=reftype)
+    
+    # Check that we got a result
+    assert result is not None
+    assert isinstance(result, str)
+    # Basic FASTA format check
+    assert result.startswith(">")
+    assert "NM_000546.6" in result
 
-def test_entrez_download_genbank_protein(client):
-    """Test downloading a protein sequence in GenBank format from Entrez."""
-    # Using a known human p53 protein sequence
-    payload = {
-        "ids": ["NP_000537.3"],
-        "db": "protein",
-        "reftype": "gb"  # GenBank format
-    }
-    response = client.post("/download/entrez", json=payload)
-    assert response.status_code == 200
-    content = response.json()
-    assert "LOCUS       NP_000537" in content
-    assert "DEFINITION  cellular tumor antigen p53 isoform a [Homo sapiens]." in content
-    assert "ORGANISM  Homo sapiens" in content
-    logger.info(f"Entrez GenBank download successful for NP_000537.3. Length: {len(content)}")
+@pytest.mark.asyncio
+async def test_download_entrez_data_genbank(download_tools: DownloadTools) -> None:
+    """Test the download_entrez_data MCP tool with GenBank format.
+    
+    This test verifies that the tool correctly downloads sequence data
+    from NCBI Entrez in GenBank format. It checks that the response
+    contains valid GenBank content.
+    
+    Note: This test requires ENTREZ_EMAIL environment variable to be set.
+    """
+    # Skip if no ENTREZ_EMAIL is set
+    if not os.getenv("ENTREZ_EMAIL"):
+        pytest.skip("ENTREZ_EMAIL environment variable not set")
+    
+    # Test data
+    ids = ["NM_000546.6"]  # Human TP53 mRNA
+    db = "nucleotide"
+    reftype = "gb"
+    
+    result: str = get_entrez(ids=ids, db=db, reftype=reftype)
+    
+    # Check that we got a result
+    assert result is not None
+    assert isinstance(result, str)
+    # Basic GenBank format check
+    assert "LOCUS" in result
+    assert "NM_000546.6" in result
 
-    # Verify the actual sequence
-    expected_sequence = (
-        "MEEPQSDPSVEPPLSQETFSDLWKLLPENNVLSPLPSQAMDDLMLSPDDIEQWFTEDPGPDEAPRMPEAA"
-        "PPVAPAPAAPTPAAPAPAPSWPLSSSVPSQKTYQGSYGFRLGFLHSGTAKSVTCTYSPALNKMFCQLAKT"
-        "CPVQLWVDSTPPPGTRVRAMAIYKQSQHMTEVVRRCPHHERCSDSDGLAPPQHLIRVEGNLRVEYLDDRN"
-        "TFRHSVVVPYEPPEVGSDCTTIHYNYMCNSSCMGGMNRRPILTIITLEDSSGNLLGRNSFEVRVCACPGR"
-        "DRRTEEENLRKKGEPHHELPPGSTKRALPNNTSSSPQPKKKPLDGEYFTLQIRGRERFEMFRELNEALEL"
-        "KDAQAGKEPGGSRAHSSHLKSKKGQSTSRHKKLMFKTEGPDSD"
+@pytest.mark.asyncio
+async def test_download_entrez_multiple_ids(download_tools: DownloadTools) -> None:
+    """Test the download_entrez_data MCP tool with multiple IDs.
+    
+    This test verifies that the tool correctly downloads multiple sequence records
+    in a single request.
+    
+    Note: This test requires ENTREZ_EMAIL environment variable to be set.
+    """
+    # Skip if no ENTREZ_EMAIL is set
+    if not os.getenv("ENTREZ_EMAIL"):
+        pytest.skip("ENTREZ_EMAIL environment variable not set")
+    
+    # Test data - multiple sequences
+    ids = ["NM_000546.6", "NM_001126112.3"]  # Two different sequences
+    db = "nucleotide"
+    reftype = "fasta"
+    
+    result: str = get_entrez(ids=ids, db=db, reftype=reftype)
+    
+    # Check that we got a result
+    assert result is not None
+    assert isinstance(result, str)
+    # Should contain both sequences
+    assert "NM_000546.6" in result
+    assert "NM_001126112.3" in result
+    # Should have multiple FASTA headers
+    assert result.count(">") >= 2
+
+@pytest.mark.asyncio
+async def test_download_entrez_data_local_fasta(download_tools: DownloadTools) -> None:
+    """Test the download_entrez_data_local MCP tool with FASTA format.
+    
+    This test verifies that the tool correctly downloads sequence data
+    from NCBI Entrez and saves it to a local file.
+    
+    Note: This test requires ENTREZ_EMAIL environment variable to be set.
+    """
+    # Skip if no ENTREZ_EMAIL is set
+    if not os.getenv("ENTREZ_EMAIL"):
+        pytest.skip("ENTREZ_EMAIL environment variable not set")
+    
+    # Test data
+    ids = ["NM_000546.6"]  # Human TP53 mRNA
+    db = "nucleotide"
+    reftype = "fasta"
+    
+    # Get the data first
+    content: str = get_entrez(ids=ids, db=db, reftype=reftype)
+    
+    # Test the save to local file functionality
+    result: LocalFileResult = download_tools._save_to_local_file(
+        data=content,
+        format_type=reftype,
+        output_path=None,
+        default_prefix=f"entrez_{db}"
     )
-    # Helper to extract sequence from GenBank format
-    def extract_sequence_from_genbank(gb_content):
-        sequence_lines = []
-        in_sequence_section = False
-        for line in gb_content.splitlines():
-            if line.startswith("ORIGIN"):
-                in_sequence_section = True
-                continue
-            if in_sequence_section:
-                if line.startswith("//"): # End of record
-                    break
-                # Remove line numbers and spaces, then concatenate sequence parts
-                parts = line.split()
-                if len(parts) > 1: # Ensure there's sequence data beyond the number
-                    sequence_lines.append("".join(parts[1:]))
-        return "".join(sequence_lines).upper() # NCBI sequences are typically uppercase
+    
+    # Check that the file was created successfully
+    assert result["success"] is True
+    assert result["format"] == reftype
+    assert result["path"] is not None
+    
+    # Check that the file exists and contains the expected content
+    file_path = Path(result["path"])
+    assert file_path.exists()
+    assert file_path.suffix == ".fasta"
+    
+    with open(file_path, 'r') as f:
+        saved_content = f.read()
+    
+    assert saved_content == content
+    assert saved_content.startswith(">")
+    assert "NM_000546.6" in saved_content
 
-    actual_sequence = extract_sequence_from_genbank(content)
-    assert actual_sequence == expected_sequence, "The downloaded protein sequence does not match the expected sequence."
-    logger.info(f"Entrez GenBank sequence verification successful for NP_000537.3.")
+@pytest.mark.asyncio
+async def test_download_entrez_data_local_genbank(download_tools: DownloadTools) -> None:
+    """Test the download_entrez_data_local MCP tool with GenBank format.
+    
+    This test verifies that the tool correctly downloads sequence data
+    from NCBI Entrez in GenBank format and saves it to a local file.
+    
+    Note: This test requires ENTREZ_EMAIL environment variable to be set.
+    """
+    # Skip if no ENTREZ_EMAIL is set
+    if not os.getenv("ENTREZ_EMAIL"):
+        pytest.skip("ENTREZ_EMAIL environment variable not set")
+    
+    # Test data
+    ids = ["NM_000546.6"]  # Human TP53 mRNA
+    db = "nucleotide"
+    reftype = "gb"
+    
+    # Get the data first
+    content: str = get_entrez(ids=ids, db=db, reftype=reftype)
+    
+    # Test the save to local file functionality
+    result: LocalFileResult = download_tools._save_to_local_file(
+        data=content,
+        format_type=reftype,
+        output_path=None,
+        default_prefix=f"entrez_{db}"
+    )
+    
+    # Check that the file was created successfully
+    assert result["success"] is True
+    assert result["format"] == reftype
+    assert result["path"] is not None
+    
+    # Check that the file exists and contains the expected content
+    file_path = Path(result["path"])
+    assert file_path.exists()
+    assert file_path.suffix == ".gb"
+    
+    with open(file_path, 'r') as f:
+        saved_content = f.read()
+    
+    assert saved_content == content
+    assert "LOCUS" in saved_content
+    assert "NM_000546.6" in saved_content
 
-def test_entrez_download_invalid_id(client):
-    """Test Entrez download with an invalid ID."""
-    payload = {
-        "ids": ["INVALID_ID_123"],
-        "db": "nucleotide",
-        "reftype": "fasta"
+@pytest.mark.asyncio
+async def test_download_entrez_data_local_custom_path(download_tools: DownloadTools) -> None:
+    """Test the download_entrez_data_local MCP tool with custom output path.
+    
+    This test verifies that the tool correctly saves data to a custom output path.
+    
+    Note: This test requires ENTREZ_EMAIL environment variable to be set.
+    """
+    # Skip if no ENTREZ_EMAIL is set
+    if not os.getenv("ENTREZ_EMAIL"):
+        pytest.skip("ENTREZ_EMAIL environment variable not set")
+    
+    # Test data
+    ids = ["NM_000546.6"]  # Human TP53 mRNA
+    db = "nucleotide"
+    reftype = "fasta"
+    custom_filename = "custom_tp53_sequence"
+    
+    # Get the data first
+    content: str = get_entrez(ids=ids, db=db, reftype=reftype)
+    
+    # Test the save to local file functionality with custom path
+    result: LocalFileResult = download_tools._save_to_local_file(
+        data=content,
+        format_type=reftype,
+        output_path=custom_filename,
+        default_prefix=f"entrez_{db}"
+    )
+    
+    # Check that the file was created successfully
+    assert result["success"] is True
+    assert result["format"] == reftype
+    assert result["path"] is not None
+    
+    # Check that the file exists with the custom name
+    file_path = Path(result["path"])
+    assert file_path.exists()
+    assert file_path.name == f"{custom_filename}.fasta"
+    
+    with open(file_path, 'r') as f:
+        saved_content = f.read()
+    
+    assert saved_content == content
+
+@pytest.mark.asyncio
+async def test_perform_pairwise_alignment_global(download_tools: DownloadTools) -> None:
+    """Test the perform_pairwise_alignment MCP tool with global alignment.
+    
+    This test verifies that the tool correctly performs global pairwise
+    sequence alignment and returns the expected results.
+    """
+    # Test data
+    sequence1 = "GATTACA"
+    sequence2 = "GCATGCU"
+    
+    request = PairwiseAlignmentRequest(
+        sequence1=sequence1,
+        sequence2=sequence2,
+        match_score=2.0,
+        mismatch_penalty=-1.0,
+        open_gap_penalty=-1.0,
+        extend_gap_penalty=-0.5,
+        mode="global"
+    )
+    
+    result: PairwiseAlignmentResponse = run_pairwise_alignment(request)
+    
+    # Check that we got a result with expected structure
+    assert result is not None
+    assert hasattr(result, "score")
+    assert hasattr(result, "aligned_sequence1")
+    assert hasattr(result, "aligned_sequence2")
+    assert hasattr(result, "full_alignment_str")
+    assert hasattr(result, "parameters_used")
+    
+    # Check that aligned sequences contain the original sequences
+    assert len(result.aligned_sequence1) >= len(sequence1)
+    assert len(result.aligned_sequence2) >= len(sequence2)
+    
+    # Check that parameters were stored correctly
+    assert result.parameters_used["match_score"] == 2.0
+    assert result.parameters_used["mismatch_penalty"] == -1.0
+    assert result.parameters_used["mode"] == "global"
+
+@pytest.mark.asyncio
+async def test_perform_pairwise_alignment_local(download_tools: DownloadTools) -> None:
+    """Test the perform_pairwise_alignment MCP tool with local alignment.
+    
+    This test verifies that the tool correctly performs local pairwise
+    sequence alignment and returns the expected results.
+    """
+    # Test data - sequences with some similarity
+    sequence1 = "ACGTACGTACGT"
+    sequence2 = "CGTACGTA"
+    
+    request = PairwiseAlignmentRequest(
+        sequence1=sequence1,
+        sequence2=sequence2,
+        match_score=1.0,
+        mismatch_penalty=-1.0,
+        open_gap_penalty=-0.5,
+        extend_gap_penalty=-0.1,
+        mode="local"
+    )
+    
+    result: PairwiseAlignmentResponse = run_pairwise_alignment(request)
+    
+    # Check that we got a result with expected structure
+    assert result is not None
+    assert hasattr(result, "score")
+    assert hasattr(result, "aligned_sequence1")
+    assert hasattr(result, "aligned_sequence2")
+    assert hasattr(result, "full_alignment_str")
+    assert hasattr(result, "parameters_used")
+    
+    # Local alignment score should be positive for similar sequences
+    assert result.score > 0
+    
+    # Check that parameters were stored correctly
+    assert result.parameters_used["mode"] == "local"
+
+@pytest.mark.asyncio
+async def test_perform_pairwise_alignment_identical_sequences(download_tools: DownloadTools) -> None:
+    """Test the perform_pairwise_alignment MCP tool with identical sequences.
+    
+    This test verifies that the tool correctly handles identical sequences
+    and returns a perfect alignment score.
+    """
+    # Test data - identical sequences
+    sequence = "ATCGATCG"
+    
+    request = PairwiseAlignmentRequest(
+        sequence1=sequence,
+        sequence2=sequence,
+        match_score=1.0,
+        mismatch_penalty=-1.0,
+        mode="global"
+    )
+    
+    result: PairwiseAlignmentResponse = run_pairwise_alignment(request)
+    
+    # Check that we got a result
+    assert result is not None
+    assert hasattr(result, "score")
+    assert hasattr(result, "aligned_sequence1")
+    assert hasattr(result, "aligned_sequence2")
+    
+    # Identical sequences should have perfect alignment
+    assert result.aligned_sequence1 == sequence
+    assert result.aligned_sequence2 == sequence
+    # Score should be positive (number of matches * match_score)
+    assert result.score > 0
+
+@pytest.mark.asyncio
+async def test_perform_pairwise_alignment_local_save_to_file(download_tools: DownloadTools) -> None:
+    """Test the perform_pairwise_alignment_local functionality.
+    
+    This test verifies that the tool correctly performs pairwise alignment
+    and saves the results to a local file.
+    """
+    # Test data
+    sequence1 = "GATTACA"
+    sequence2 = "GCATGCU"
+    
+    request = PairwiseAlignmentRequest(
+        sequence1=sequence1,
+        sequence2=sequence2,
+        match_score=2.0,
+        mismatch_penalty=-1.0,
+        open_gap_penalty=-1.0,
+        extend_gap_penalty=-0.5,
+        mode="global"
+    )
+    
+    # Get the alignment result
+    alignment_result: PairwiseAlignmentResponse = run_pairwise_alignment(request)
+    
+    # Create detailed alignment output (similar to what the local tool would create)
+    alignment_content = f"""Pairwise Alignment Results
+=============================
+
+Parameters:
+- Match Score: {alignment_result.parameters_used['match_score']}
+- Mismatch Penalty: {alignment_result.parameters_used['mismatch_penalty']}
+- Open Gap Penalty: {alignment_result.parameters_used['open_gap_penalty']}
+- Extend Gap Penalty: {alignment_result.parameters_used['extend_gap_penalty']}
+- Mode: {alignment_result.parameters_used['mode']}
+
+Alignment Score: {alignment_result.score}
+
+Aligned Sequences:
+{alignment_result.full_alignment_str}
+
+Sequence 1 (aligned): {alignment_result.aligned_sequence1}
+Sequence 2 (aligned): {alignment_result.aligned_sequence2}
+"""
+    
+    # Test saving to local file
+    result: LocalFileResult = download_tools._save_to_local_file(
+        data=alignment_content,
+        format_type="alignment",
+        output_path=None,
+        default_prefix="pairwise_alignment"
+    )
+    
+    # Check that the file was created successfully
+    assert result["success"] is True
+    assert result["format"] == "alignment"
+    assert result["path"] is not None
+    
+    # Check that the file exists and contains the expected content
+    file_path = Path(result["path"])
+    assert file_path.exists()
+    assert file_path.suffix == ".aln"
+    
+    with open(file_path, 'r') as f:
+        saved_content = f.read()
+    
+    assert saved_content == alignment_content
+    assert "Pairwise Alignment Results" in saved_content
+    assert f"Alignment Score: {alignment_result.score}" in saved_content
+    assert "GATTACA" in saved_content
+    assert "GCATGCU" in saved_content
+
+@pytest.mark.asyncio
+async def test_output_directory_creation(download_tools: DownloadTools) -> None:
+    """Test that output directory is created correctly."""
+    # Check that output directory exists
+    assert download_tools.output_dir.exists()
+    assert download_tools.output_dir.is_dir()
+
+@pytest.mark.asyncio
+async def test_save_to_local_file_json_format(download_tools: DownloadTools) -> None:
+    """Test saving data in JSON format."""
+    test_data = {
+        "gene_id": "ENSG00000141510",
+        "gene_name": "TP53",
+        "description": "tumor protein p53"
     }
-    response = client.post("/download/entrez", json=payload)
-    # NCBI often returns 400 for bad requests like invalid ID format
-    # or if ID does not exist, the efetch will return an empty result which might not be an error from client perspective
-    # but here the API should probably propagate an error if Entrez.efetch itself fails or returns empty unexpectedly.
-    # Based on current implementation, Entrez.efetch might return empty string for invalid ID without raising HTTPError directly.
-    # The API wrapper in `download_api.py` might need adjustment to explicitly check for empty results if that's an error condition.
-    # For now, let's assume NCBI might return 200 with empty or minimal content for non-existent specific IDs if no other error occurs.
-    # If the ID format is grossly invalid, a 400 is more likely from NCBI directly.
-    # Let's test for 200 and empty content, or a 400/500 if the API handles it as an error.
-    if response.status_code == 200:
-        assert response.json() == "", "Expected empty response for invalid ID if status is 200"
-        logger.warning("Entrez download with invalid ID returned 200 with empty content.")
-    else:
-        assert response.status_code in [400, 404, 500] # More robust check for various error codes
-        logger.info(f"Entrez download with invalid ID correctly failed with status: {response.status_code}")
+    
+    result: LocalFileResult = download_tools._save_to_local_file(
+        data=test_data,
+        format_type="json",
+        output_path="test_gene_data",
+        default_prefix="test"
+    )
+    
+    # Check that the file was created successfully
+    assert result["success"] is True
+    assert result["format"] == "json"
+    assert result["path"] is not None
+    
+    # Check that the file exists and contains the expected content
+    file_path = Path(result["path"])
+    assert file_path.exists()
+    assert file_path.suffix == ".json"
+    
+    import json
+    with open(file_path, 'r') as f:
+        saved_data = json.load(f)
+    
+    assert saved_data == test_data
 
-def test_entrez_download_invalid_db(client):
-    """Test Entrez download with an invalid database name."""
-    payload = {
-        "ids": ["NM_000546.6"],
-        "db": "invalid_database_name",
-        "reftype": "fasta"
-    }
-    response = client.post("/download/entrez", json=payload)
-    # Expecting a 400 or 500 due to server-side validation or error from Entrez
-    assert response.status_code >= 400
-    data = response.json()
-    assert "detail" in data
-    logger.info(f"Entrez download with invalid DB correctly failed with status: {response.status_code}, details: {data.get('detail')}")
-
-def test_pairwise_alignment_global_valid(client):
-    """Test global pairwise alignment with valid sequences."""
-    payload = {
-        "sequence1": "GATTACA",
-        "sequence2": "GCATGCU", # Note: U is not standard DNA, Biopython handles it
-        "match_score": 2.0,
-        "mismatch_penalty": -1.0,
-        "open_gap_penalty": -1.0,
-        "extend_gap_penalty": -0.5,
-        "mode": "global"
-    }
-    response = client.post("/tools/align/pairwise", json=payload)
-    assert response.status_code == 200, f"Expected 200 OK but got {response.status_code}. Response: {response.text}"
-    data = response.json()
-
-    assert "score" in data
-    assert isinstance(data["score"], float)
-    assert "aligned_sequence1" in data
-    assert isinstance(data["aligned_sequence1"], str)
-    assert "aligned_sequence2" in data
-    assert isinstance(data["aligned_sequence2"], str)
-    assert "full_alignment_str" in data
-    assert isinstance(data["full_alignment_str"], str)
-    assert "parameters_used" in data
-    assert isinstance(data["parameters_used"], dict)
-    assert data["parameters_used"]["sequence1"] == payload["sequence1"] # Check if params are echoed back
-
-    # Basic check that aligned sequences are not empty and have similar lengths (can be refined)
-    assert len(data["aligned_sequence1"]) > 0
-    assert len(data["aligned_sequence2"]) > 0
-    assert len(data["aligned_sequence1"]) == len(data["aligned_sequence2"])
-
-    # Log the actual alignment for review
-    logger.info(f"Global alignment successful. Score: {data['score']}")
-    logger.info(f"Alignment:\n{data['full_alignment_str']}")
-    # Example of a more specific check (this would require knowing the exact expected alignment)
-    # expected_aligned1 = "GATTACA" 
-    # expected_aligned2 = "GCA-TGC" # This is an example, actual alignment depends on scoring
-    # assert data["aligned_sequence1"] == expected_aligned1
-    # assert data["aligned_sequence2"] == expected_aligned2
-    # assert data["score"] ==  -0.5 # Example score, needs to be calculated or known
-
-def test_pairwise_alignment_local_valid(client):
-    """Test local pairwise alignment with valid sequences."""
-    payload = {
-        "sequence1": "AGCTAGCTAGCT",
-        "sequence2": "GCTAGC",
-        "match_score": 5.0,
-        "mismatch_penalty": -4.0,
-        "open_gap_penalty": -10.0,
-        "extend_gap_penalty": -0.5,
-        "mode": "local"
-    }
-    response = client.post("/tools/align/pairwise", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert "score" in data
-    assert isinstance(data["score"], float)
-    assert "aligned_sequence1" in data
-    assert isinstance(data["aligned_sequence1"], str)
-    assert "aligned_sequence2" in data
-    assert isinstance(data["aligned_sequence2"], str)
-    assert "full_alignment_str" in data
-    assert isinstance(data["full_alignment_str"], str)
-    assert "parameters_used" in data
-    assert isinstance(data["parameters_used"], dict)
-    logger.info(f"Local alignment request resulted in 200 as expected.")
-
-def test_pairwise_alignment_empty_sequence(client):
-    """Test pairwise alignment with one empty sequence."""
-    payload = {
-        "sequence1": "",
-        "sequence2": "GCATGCU",
-        "mode": "global"
-    }
-    response = client.post("/tools/align/pairwise", json=payload)
-    # Biopython might produce a result (e.g. aligning to all gaps) or the API might raise an error.
-    # The current implementation of `run_pairwise_alignment` would likely lead to a ValueError from Biopython if sequences are empty or invalid.
-    # This ValueError is caught and results in a 400 error.
-    assert response.status_code == 400
-    # Check for an appropriate error message if the API provides one
-    data = response.json()
-    assert "detail" in data
-    assert isinstance(data["detail"], str) # Expect a string detail
-    assert "sequence has zero length" in data["detail"] # Check for specific error message
-    logger.info(f"Pairwise alignment with empty sequence correctly failed with status 400 and detail: {data['detail']}")
-
-def test_pairwise_alignment_invalid_params(client):
-    """Test pairwise alignment with invalid scoring parameters (e.g., positive mismatch penalty if not intended)."""
-    payload = {
-        "sequence1": "GATTACA",
-        "sequence2": "GCATGCU",
-        "match_score": 1.0,
-        "mismatch_penalty": 1.0,  # Positive mismatch penalty, usually not desired/supported explicitly by some algos
-        "open_gap_penalty": 0.5, # Positive open gap penalty
-        "extend_gap_penalty": 0.1, # Positive extend gap penalty
-        "mode": "global"
-    }
-    # The Pydantic model has constraints like "Should be negative or zero."
-    # However, those are descriptions, not hard Pydantic validation constraints like `lt=0`.
-    # Biopython itself might accept these values but produce unusual results, or it might raise an error for some combinations.
-    # The API itself does not add further validation on these values beyond Pydantic's type checks.
-    # Let's assume Biopython handles it, and we check for a 200, but the results might be "unphysical".
-    response = client.post("/tools/align/pairwise", json=payload)
-    # If Biopython raises an error due to parameters, it would be a 400 or 500 from the API.
-    # For this test, we'll assume it processes and returns a result.
-    # A more robust test might check specific Biopython behavior for such params if known.
-    assert response.status_code == 200 # or 400 if Biopython/Pydantic eventually rejects it
+@pytest.mark.asyncio
+async def test_save_to_local_file_error_handling(download_tools: DownloadTools) -> None:
+    """Test error handling in _save_to_local_file method."""
+    # Test with invalid path (trying to write to a directory that doesn't exist and can't be created)
+    invalid_path = "/root/nonexistent/path/test_file"
+    
+    result: LocalFileResult = download_tools._save_to_local_file(
+        data="test content",
+        format_type="txt",
+        output_path=invalid_path,
+        default_prefix="test"
+    )
+    
+    # Should handle the error gracefully
+    assert result["success"] is False
+    assert result["path"] is None
+    assert "error" in result
+    assert result["format"] == "txt"

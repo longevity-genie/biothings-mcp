@@ -26,12 +26,36 @@ MCP is a protocol that bridges the gap between AI systems and specialized domain
 
 ## Available API Interfaces
 
-This server provides dedicated API interfaces for different BioThings data types, leveraging the `biothings-typed-client` library. These interfaces are implemented using the following mixins:
+This server provides dedicated API interfaces for different BioThings data types, leveraging the `biothings-typed-client` library. These interfaces are implemented using the following tool handlers:
 
-- **Gene Interface**: `GeneRoutesMixin` (wraps `GeneClientAsync`)
-- **Variant Interface**: `VariantsRoutesMixin` (wraps `VariantClientAsync`)
-- **Chemical Interface**: `ChemRoutesMixin` (wraps `ChemClientAsync`)
-- **Taxon Interface**: `TaxonRoutesMixin` (wraps `TaxonClientAsync`)
+- **Gene Interface**: `GeneTools` (wraps `GeneClientAsync`)
+- **Variant Interface**: `VariantTools` (wraps `VariantClientAsync`)
+- **Chemical Interface**: `ChemTools` (wraps `ChemClientAsync`)
+- **Taxon Interface**: `TaxonTools` (wraps `TaxonClientAsync`)
+- **Download Interface**: `DownloadTools` (provides file download and sequence analysis capabilities)
+
+## Local File Saving Features
+
+The server includes local file saving capabilities through the `DownloadTools` interface, which provides:
+
+### Download Tools
+- **`download_entrez_data`**: Download data from NCBI Entrez databases (returns content as string)
+- **`download_entrez_data_local`**: Download data from NCBI Entrez databases and save to local file
+- **`perform_pairwise_alignment`**: Perform pairwise sequence alignment (returns alignment results)
+- **`perform_pairwise_alignment_local`**: Perform pairwise sequence alignment and save results to local file
+
+### Output Directory Management
+- **Default Location**: Files are saved to `biothings_output/` directory in the current working directory
+- **Custom Location**: Use `--output-dir` parameter to specify a custom output directory
+- **Automatic Creation**: Output directories are created automatically if they don't exist
+- **Unique Filenames**: Auto-generated filenames include UUID prefixes to avoid conflicts
+
+### Supported File Formats
+- **FASTA**: `.fasta` extension for sequence data
+- **GenBank**: `.gb` extension for GenBank format data
+- **Alignment**: `.aln` extension for alignment results
+- **JSON**: `.json` extension for structured data
+- **Text**: `.txt` extension for general text data
 
 ## Quick Start
 

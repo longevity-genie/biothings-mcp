@@ -1,13 +1,17 @@
+#!/usr/bin/env python3
+"""Download API tools for MCP server - converts download APIs to MCP tools."""
+
 import os
+import json
+import uuid
 from Bio import Entrez, SeqIO
 from Bio.Align import PairwiseAligner
 from Bio.Seq import Seq
 from pydantic import BaseModel, Field, ConfigDict
 from pathlib import Path
-from typing import Literal, List, Dict, Optional
-from fastapi import HTTPException
+from typing import Literal, List, Dict, Optional, Any
 from urllib.error import HTTPError
-
+from eliot import start_action
 
 DB_LITERAL = Literal[
     "pubmed", "protein", "nuccore", "ipg", "nucleotide", "structure", "genome",
@@ -17,7 +21,6 @@ DB_LITERAL = Literal[
     "proteinclusters", "pcassay", "protfam", "pccompound", "pcsubstance",
     "seqannot", "snp", "sra", "taxonomy", "biocollections", "gtr"
 ]
-
 
 class EntrezDownloadRequest(BaseModel):
     ids: List[str]
@@ -33,7 +36,6 @@ class EntrezDownloadRequest(BaseModel):
             }
         }
     }
-
 
 class PairwiseAlignmentRequest(BaseModel):
     sequence1: str = Field(..., description="First sequence for alignment.")
@@ -65,34 +67,124 @@ class PairwiseAlignmentResponse(BaseModel):
     full_alignment_str: str
     parameters_used: Dict
 
-class DownloadsMixin:
-      
-      def _download_routes_config(self):
-        """Configure API routes, including Entrez downloads and Biopython tools."""
+# Type hint for local file results
+LocalFileResult = Dict[Literal["path", "format", "success", "error"], Any]
 
-        @self.post(
-            "/download/entrez",
-            tags=["downloads"],
-            summary="Download data from NCBI Entrez",
-            operation_id="download_entrez_data",
-            description="""
-            Downloads data records from specified NCBI Entrez databases using Bio.Entrez.
-            This endpoint is designed to be called by automated agents (like LLMs) or other services.
+class DownloadTools:
+    """Handler for download-related MCP tools."""
+    
+    def __init__(self, mcp_server, prefix: str = "", output_dir: Optional[str] = None):
+        self.mcp_server = mcp_server
+        self.prefix = prefix
+        self.output_dir = Path(output_dir) if output_dir else Path.cwd() / "biothings_output"
+        
+        # Create output directory if it doesn't exist
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+    
+    def _save_to_local_file(
+        self, 
+        data: Any, 
+        format_type: str, 
+        output_path: Optional[str] = None,
+        default_prefix: str = "biothings_output"
+    ) -> LocalFileResult:
+        """Helper function to save data to local files.
+        
+        Args:
+            data: The data to save
+            format_type: File format ('fasta', 'gb', 'json', 'txt', etc.)
+            output_path: Full output path (absolute or relative) or None to auto-generate
+            default_prefix: Prefix for auto-generated filenames
+            
+        Returns:
+            LocalFileResult: Contains path, format, success status, and optional error information
+        """
+        # Map format types to file extensions
+        format_extensions = {
+            'fasta': '.fasta',
+            'gb': '.gb',
+            'json': '.json',
+            'txt': '.txt',
+            'tsv': '.tsv',
+            'alignment': '.aln'
+        }
+        
+        extension = format_extensions.get(format_type, '.txt')
+        
+        if output_path is None:
+            # Generate a unique filename in the default output directory
+            base_name = f"{default_prefix}_{str(uuid.uuid4())[:8]}"
+            file_path = self.output_dir / f"{base_name}{extension}"
+        else:
+            # Use the provided path
+            path_obj = Path(output_path)
+            if path_obj.is_absolute():
+                # Absolute path - use as is, but ensure it has the right extension
+                if path_obj.suffix != extension:
+                    file_path = path_obj.with_suffix(extension)
+                else:
+                    file_path = path_obj
+            else:
+                # Relative path - concatenate with output directory
+                if not str(output_path).endswith(extension):
+                    file_path = self.output_dir / f"{output_path}{extension}"
+                else:
+                    file_path = self.output_dir / output_path
+        
+        try:
+            if format_type in ['fasta', 'gb']:
+                # Write sequence data
+                with open(file_path, 'w') as f:
+                    f.write(str(data))
+            elif format_type == 'json':
+                with open(file_path, 'w') as f:
+                    json.dump(data, f, indent=2, default=str)
+            elif format_type == 'alignment':
+                # Write alignment data
+                with open(file_path, 'w') as f:
+                    f.write(str(data))
+            else:
+                # Default to text format
+                with open(file_path, 'w') as f:
+                    if isinstance(data, dict):
+                        json.dump(data, f, indent=2, default=str)
+                    else:
+                        f.write(str(data))
+                        
+            return {
+                "path": str(file_path),
+                "format": format_type,
+                "success": True
+            }
+        except Exception as e:
+            return {
+                "path": None,
+                "format": format_type,
+                "success": False,
+                "error": str(e)
+            }
+    
+    def register_tools(self):
+        """Register download-related MCP tools."""
+        
+        @self.mcp_server.tool(
+            name=f"{self.prefix}download_entrez_data",
+            description="""Download data from NCBI Entrez databases using Bio.Entrez.
+            
+            Downloads data records from specified NCBI Entrez databases. This tool is designed to be called 
+            by automated agents (like LLMs) or other services.
 
             **Critical Configuration:**
             The server hosting this API *must* have the `ENTREZ_EMAIL` environment variable set
             to a valid email address. NCBI requires this for Entrez queries to monitor usage
             and prevent abuse. Without it, NCBI may block requests.
 
-            **Request Body Parameters:**
+            **Parameters:**
             - `ids` (List[str], required): A list of unique identifiers for the records to fetch
-              from the specified Entrez database.
-              Example: `["NM_000546.6", "AY123456.1"]`
+              from the specified Entrez database. Example: `["NM_000546.6", "AY123456.1"]`
             - `db` (DB_LITERAL, required): The target NCBI Entrez database.
               Common choices for sequences: 'nucleotide', 'protein'.
               Other examples: 'gene', 'pubmed', 'taxonomy'.
-              For a comprehensive list of supported databases, refer to the `DB_LITERAL`
-              type definition in the API schema (includes options like 'pubmed', 'protein', 'nuccore', 'ipg', 'nucleotide', etc.).
               Ensure the `ids` provided are appropriate for the selected `db`.
             - `reftype` (Literal["fasta", "gb"], required): The desired format for the
               downloaded data.
@@ -100,71 +192,282 @@ class DownloadsMixin:
                 - "gb": Returns data in GenBank format.
               Ensure the chosen `reftype` is compatible with the selected `db`.
 
-            **Response:**
-            - On success: Returns the downloaded data as a single raw string with a
-              `Content-Type` of `text/plain`. The content directly corresponds to the
-              data fetched from Entrez in the specified `reftype`.
-            - On failure:
-                - If NCBI Entrez returns an error (e.g., invalid ID, unsupported `db`/`reftype`
-                  combination, rate limiting), an HTTPException with the corresponding
-                  status code (e.g., 400, 404, 503) and details from NCBI will be raised.
-                - For other unexpected server-side errors during the process, an
-                  HTTPException with status code 500 will be raised.
-
-            **Example LLM Usage:**
-            An LLM agent intending to fetch the FASTA sequence for human TP53 mRNA (NM_000546.6)
-            would construct a POST request to this endpoint with the following JSON body:
-            ```json
-            {{
-                "ids": ["NM_000546.6"],
-                "db": "nucleotide",
-                "reftype": "fasta"
-            }}
+            **Returns:**
+            On success: Returns the downloaded data as a single raw string with the
+            data fetched from Entrez in the specified `reftype`.
+            
+            **Example Usage:**
+            To fetch the FASTA sequence for human TP53 mRNA (NM_000546.6):
             ```
-            The agent should then be prepared to handle a plain text response containing
-            the FASTA sequence or an error object if the request fails.
-            """,
-        )
-        def entrez_download(request: EntrezDownloadRequest):
-            """
-            Handles Entrez download requests.
-            Uses the globally defined `get_entred` function.
-            """
-            try:
-                downloaded_content = get_entred(
-                    ids=request.ids,
-                    db=request.db,
-                    reftype=request.reftype
-                )
-                return downloaded_content
-            except HTTPError as he:
-                raise HTTPException(status_code=he.code, detail=f"NCBI Entrez Error ({he.code}): {he.reason}")
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"An unexpected error occurred during Entrez download: {str(e)}")
+            download_entrez_data(
+                ids=["NM_000546.6"],
+                db="nucleotide",
+                reftype="fasta"
+            )
+            ```
+            """)
+        def download_entrez_data(ids: List[str], db: DB_LITERAL, reftype: Literal["fasta", "gb"]) -> str:
+            with start_action(action_type="download_entrez_data", ids=ids, db=db, reftype=reftype) as action:
+                try:
+                    downloaded_content = get_entrez(ids=ids, db=db, reftype=reftype)
+                    action.add_success_fields(content_length=len(downloaded_content))
+                    return downloaded_content
+                except HTTPError as he:
+                    action.add_error_fields(error=f"NCBI Entrez Error ({he.code}): {he.reason}")
+                    raise ValueError(f"NCBI Entrez Error ({he.code}): {he.reason}") from he
+                except Exception as e:
+                    action.add_error_fields(error=f"Unexpected error during Entrez download: {str(e)}")
+                    raise ValueError(f"An unexpected error occurred during Entrez download: {str(e)}") from e
+        
+        @self.mcp_server.tool(
+            name=f"{self.prefix}download_entrez_data_local",
+            description="""Download data from NCBI Entrez databases and save to local file.
+            
+            Same as download_entrez_data but saves the result to a local file instead of returning the content.
+            This is useful for large downloads or when you want to persist the data.
 
-        @self.post(
-            "/tools/align/pairwise",
-            response_model=PairwiseAlignmentResponse,
-            tags=["biotools"],
-            summary="Perform pairwise sequence alignment using Biopython",
-            operation_id="perform_pairwise_alignment",
-            description="""
+            **Parameters:**
+            - `ids` (List[str], required): A list of unique identifiers for the records to fetch
+            - `db` (DB_LITERAL, required): The target NCBI Entrez database
+            - `reftype` (Literal["fasta", "gb"], required): The desired format for the downloaded data
+            - `output_path` (Optional[str]): Custom output path. If None, generates unique filename
+            
+            **Returns:**
+            LocalFileResult containing:
+            - `path`: Path to the saved file
+            - `format`: File format used
+            - `success`: Whether the operation succeeded
+            - `error`: Error message if failed
+            
+            **Example Usage:**
+            ```
+            download_entrez_data_local(
+                ids=["NM_000546.6"],
+                db="nucleotide",
+                reftype="fasta",
+                output_path="tp53_sequence.fasta"
+            )
+            ```
+            """)
+        def download_entrez_data_local(
+            ids: List[str], 
+            db: DB_LITERAL, 
+            reftype: Literal["fasta", "gb"],
+            output_path: Optional[str] = None
+        ) -> LocalFileResult:
+            with start_action(action_type="download_entrez_data_local", ids=ids, db=db, reftype=reftype) as action:
+                try:
+                    downloaded_content = get_entrez(ids=ids, db=db, reftype=reftype)
+                    result = self._save_to_local_file(
+                        data=downloaded_content,
+                        format_type=reftype,
+                        output_path=output_path,
+                        default_prefix=f"entrez_{db}"
+                    )
+                    action.add_success_fields(
+                        content_length=len(downloaded_content),
+                        saved_to=result.get("path"),
+                        success=result.get("success")
+                    )
+                    return result
+                except HTTPError as he:
+                    action.add_error_fields(error=f"NCBI Entrez Error ({he.code}): {he.reason}")
+                    return {
+                        "path": None,
+                        "format": reftype,
+                        "success": False,
+                        "error": f"NCBI Entrez Error ({he.code}): {he.reason}"
+                    }
+                except Exception as e:
+                    action.add_error_fields(error=f"Unexpected error during Entrez download: {str(e)}")
+                    return {
+                        "path": None,
+                        "format": reftype,
+                        "success": False,
+                        "error": f"An unexpected error occurred during Entrez download: {str(e)}"
+                    }
+        
+        @self.mcp_server.tool(
+            name=f"{self.prefix}perform_pairwise_alignment",
+            description="""Perform pairwise sequence alignment using Biopython's PairwiseAligner.
+            
             Performs a pairwise sequence alignment (global or local) using Biopython's PairwiseAligner.
             You can specify sequences and alignment scoring parameters.
-            """
-        )
-        def pairwise_alignment_route(request: PairwiseAlignmentRequest):
-            try:
-                response = run_pairwise_alignment(request)
-                return response
-            except ValueError as ve:
-                raise HTTPException(status_code=400, detail=str(ve))
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"An unexpected error occurred during alignment: {str(e)}")
-    
-    
+            
+            **Parameters:**
+            - `sequence1` (str): First sequence for alignment
+            - `sequence2` (str): Second sequence for alignment
+            - `match_score` (float): Score for a match (default: 1.0)
+            - `mismatch_penalty` (float): Penalty for a mismatch (default: -1.0, should be negative or zero)
+            - `open_gap_penalty` (float): Penalty for opening a gap (default: -0.5, should be negative or zero)
+            - `extend_gap_penalty` (float): Penalty for extending a gap (default: -0.1, should be negative or zero)
+            - `mode` (str): Alignment mode - 'global' or 'local' (default: 'global')
+            
+            **Returns:**
+            PairwiseAlignmentResponse containing:
+            - `score`: Alignment score
+            - `aligned_sequence1`: First sequence with gaps
+            - `aligned_sequence2`: Second sequence with gaps
+            - `full_alignment_str`: Complete alignment visualization
+            - `parameters_used`: Parameters used for the alignment
+            
+            **Example Usage:**
+            ```
+            perform_pairwise_alignment(
+                sequence1="GATTACA",
+                sequence2="GCATGCU",
+                match_score=2.0,
+                mismatch_penalty=-1.0,
+                mode="global"
+            )
+            ```
+            """)
+        def perform_pairwise_alignment(
+            sequence1: str,
+            sequence2: str,
+            match_score: float = 1.0,
+            mismatch_penalty: float = -1.0,
+            open_gap_penalty: float = -0.5,
+            extend_gap_penalty: float = -0.1,
+            mode: Literal["global", "local"] = "global"
+        ) -> PairwiseAlignmentResponse:
+            with start_action(action_type="perform_pairwise_alignment", 
+                            sequence1_length=len(sequence1), 
+                            sequence2_length=len(sequence2), 
+                            mode=mode) as action:
+                try:
+                    request = PairwiseAlignmentRequest(
+                        sequence1=sequence1,
+                        sequence2=sequence2,
+                        match_score=match_score,
+                        mismatch_penalty=mismatch_penalty,
+                        open_gap_penalty=open_gap_penalty,
+                        extend_gap_penalty=extend_gap_penalty,
+                        mode=mode
+                    )
+                    response = run_pairwise_alignment(request)
+                    action.add_success_fields(alignment_score=response.score)
+                    return response
+                except ValueError as ve:
+                    action.add_error_fields(error=str(ve))
+                    raise ValueError(str(ve)) from ve
+                except Exception as e:
+                    action.add_error_fields(error=f"Unexpected error during alignment: {str(e)}")
+                    raise ValueError(f"An unexpected error occurred during alignment: {str(e)}") from e
+        
+        @self.mcp_server.tool(
+            name=f"{self.prefix}perform_pairwise_alignment_local",
+            description="""Perform pairwise sequence alignment and save results to local file.
+            
+            Same as perform_pairwise_alignment but saves the alignment result to a local file instead of returning it.
+            This is useful for preserving alignment results for further analysis.
+            
+            **Parameters:**
+            - `sequence1` (str): First sequence for alignment
+            - `sequence2` (str): Second sequence for alignment
+            - `match_score` (float): Score for a match (default: 1.0)
+            - `mismatch_penalty` (float): Penalty for a mismatch (default: -1.0, should be negative or zero)
+            - `open_gap_penalty` (float): Penalty for opening a gap (default: -0.5, should be negative or zero)
+            - `extend_gap_penalty` (float): Penalty for extending a gap (default: -0.1, should be negative or zero)
+            - `mode` (str): Alignment mode - 'global' or 'local' (default: 'global')
+            - `output_path` (Optional[str]): Custom output path. If None, generates unique filename
+            
+            **Returns:**
+            LocalFileResult containing:
+            - `path`: Path to the saved alignment file
+            - `format`: File format used ('alignment')
+            - `success`: Whether the operation succeeded
+            - `error`: Error message if failed
+            
+            **Example Usage:**
+            ```
+            perform_pairwise_alignment_local(
+                sequence1="GATTACA",
+                sequence2="GCATGCU",
+                match_score=2.0,
+                mismatch_penalty=-1.0,
+                mode="global",
+                output_path="alignment_result.aln"
+            )
+            ```
+            """)
+        def perform_pairwise_alignment_local(
+            sequence1: str,
+            sequence2: str,
+            match_score: float = 1.0,
+            mismatch_penalty: float = -1.0,
+            open_gap_penalty: float = -0.5,
+            extend_gap_penalty: float = -0.1,
+            mode: Literal["global", "local"] = "global",
+            output_path: Optional[str] = None
+        ) -> LocalFileResult:
+            with start_action(action_type="perform_pairwise_alignment_local", 
+                            sequence1_length=len(sequence1), 
+                            sequence2_length=len(sequence2), 
+                            mode=mode) as action:
+                try:
+                    request = PairwiseAlignmentRequest(
+                        sequence1=sequence1,
+                        sequence2=sequence2,
+                        match_score=match_score,
+                        mismatch_penalty=mismatch_penalty,
+                        open_gap_penalty=open_gap_penalty,
+                        extend_gap_penalty=extend_gap_penalty,
+                        mode=mode
+                    )
+                    response = run_pairwise_alignment(request)
+                    
+                    # Create detailed alignment output
+                    alignment_content = f"""Pairwise Alignment Results
+=============================
+
+Parameters:
+- Match Score: {response.parameters_used['match_score']}
+- Mismatch Penalty: {response.parameters_used['mismatch_penalty']}
+- Open Gap Penalty: {response.parameters_used['open_gap_penalty']}
+- Extend Gap Penalty: {response.parameters_used['extend_gap_penalty']}
+- Mode: {response.parameters_used['mode']}
+
+Alignment Score: {response.score}
+
+Aligned Sequences:
+{response.full_alignment_str}
+
+Sequence 1 (aligned): {response.aligned_sequence1}
+Sequence 2 (aligned): {response.aligned_sequence2}
+"""
+                    
+                    result = self._save_to_local_file(
+                        data=alignment_content,
+                        format_type="alignment",
+                        output_path=output_path,
+                        default_prefix="pairwise_alignment"
+                    )
+                    action.add_success_fields(
+                        alignment_score=response.score,
+                        saved_to=result.get("path"),
+                        success=result.get("success")
+                    )
+                    return result
+                except ValueError as ve:
+                    action.add_error_fields(error=str(ve))
+                    return {
+                        "path": None,
+                        "format": "alignment",
+                        "success": False,
+                        "error": str(ve)
+                    }
+                except Exception as e:
+                    action.add_error_fields(error=f"Unexpected error during alignment: {str(e)}")
+                    return {
+                        "path": None,
+                        "format": "alignment",
+                        "success": False,
+                        "error": f"An unexpected error occurred during alignment: {str(e)}"
+                    }
 
 def run_pairwise_alignment(request: PairwiseAlignmentRequest) -> PairwiseAlignmentResponse:
+    """Run pairwise alignment using Biopython."""
     aligner = PairwiseAligner()
     aligner.match_score = request.match_score
     aligner.mismatch_score = request.mismatch_penalty
@@ -190,194 +493,44 @@ def run_pairwise_alignment(request: PairwiseAlignmentRequest) -> PairwiseAlignme
         aligned_sequence1=aligned_seq1_str,
         aligned_sequence2=aligned_seq2_str,
         full_alignment_str=str(best_alignment),
-        parameters_used=request.dict()
+        parameters_used=request.model_dump()
     )
 
-def get_entred(ids: List[str], db: DB_LITERAL, reftype: Literal["fasta", "gb"]) -> str:
+def get_entrez(ids: List[str], db: DB_LITERAL, reftype: Literal["fasta", "gb"]) -> str:
     """
     Downloads data from NCBI Entrez databases.
 
     This function uses Bio.Entrez to fetch data based on a list of IDs from a specified database.
-    It requires an email address for NCBI, which should be set via the ENTREZ_EMAIL environment
-    variable or it defaults to "default_email@example.com" if the variable is not set.
-
+    
     Args:
-        ids: A list of strings, where each string is an ID for the records to be downloaded
-             from the specified Entrez database.
-        db: The Entrez database to query. While many NCBI databases exist, this function's
-            type hints suggest primary support for "protein" and "nucleotide".
-            Example list of Entrez databases:
-            ['pubmed', 'protein', 'nuccore', 'ipg', 'nucleotide', 'structure', 'genome',
-            'annotinfo', 'assembly', 'bioproject', 'biosample', 'blastdbinfo', 'books',
-            'cdd', 'clinvar', 'gap', 'gapplus', 'grasp', 'dbvar', 'gene', 'gds',
-            'geoprofiles', 'medgen', 'mesh', 'nlmcatalog', 'omim', 'orgtrack', 'pmc',
-            'proteinclusters', 'pcassay', 'protfam', 'pccompound', 'pcsubstance',
-            'seqannot', 'snp', 'sra', 'taxonomy', 'biocollections', 'gtr'].
-        reftype: The format of the returned data, e.g., 'fasta' or 'gb' (GenBank).
-                 This function's type hints suggest primary support for "fasta" and "gb".
-
+        ids: List of unique identifiers for the records to fetch
+        db: The target NCBI Entrez database
+        reftype: The desired format for the downloaded data ("fasta" or "gb")
+        
     Returns:
-        A string containing the raw data downloaded from Entrez. For text-based formats
-        like FASTA or GenBank, this is typically a string. For binary formats, it might be bytes
-        (though this function is typed to return str).
-
+        str: The downloaded data as a string
+        
     Raises:
-        Various exceptions can be raised by Bio.Entrez.efetch if the request fails,
-        such as HTTPError (e.g., for invalid IDs or incorrect db/reftype combinations),
-        URLError (network issues), or other NCBI-specific errors.
-
-    Example:
-        >>> from pathlib import Path
-        >>> import os
-        >>> # CRITICAL: Set your email for NCBI Entrez access
-        >>> # For example, in your shell: export ENTREZ_EMAIL="your.email@example.com"
-        >>> # Fallback for example if not set (NCBI might block extensive use without email):
-        >>> if not os.getenv("ENTREZ_EMAIL"):
-        ...     print("Example: ENTREZ_EMAIL not set, using placeholder. NCBI usage may be restricted.")
-        ...     os.environ["ENTREZ_EMAIL"] = "default_test@example.com" # For doctest only
-        >>>
-        >>> download_dir_example = Path("./entrez_example_output")
-        >>> download_dir_example.mkdir(exist_ok=True)
-        >>>
-        >>> # Example: Fetching a nucleotide sequence in FASTA format
-        >>> nucleotide_ids_ex = ["NM_000546.6"] # Human TP53 mRNA
-        >>> if os.getenv("ENTREZ_EMAIL") != "default_test@example.com" or True: # Run if email is set
-        ...     nucleotide_content = entrez_download(
-        ...         where=download_dir_example,
-        ...         ids=nucleotide_ids_ex,
-        ...         db="nucleotide", # Defaulting to nucleotide
-        ...         reftype="fasta"
-        ...     )
-        ...     print(f"Fetched nucleotide (first 60 chars): {nucleotide_content[:60].replace('\n', ' ')}...")
-        >>>
-        >>> # Example: Fetching a protein sequence (conceptual, check reftype for protein)
-        >>> # To demonstrate a different database, let's use protein with an appropriate ID
-        >>> protein_ids_ex = ["NP_000537.3"] # Human p53 protein
-        >>> if os.getenv("ENTREZ_EMAIL") != "default_test@example.com" or True: # Run if email is set
-        ...     protein_content_fasta = entrez_download(
-        ...         where=download_dir_example,
-        ...         ids=protein_ids_ex,
-        ...         db="protein", 
-        ...         reftype="fasta"
-        ...     )
-        ...     print(f"Fetched protein FASTA (first 60 chars): {protein_content_fasta[:60].replace('\n', ' ')}...")
+        HTTPError: If NCBI returns an error
+        Exception: For other unexpected errors
     """
-    Entrez.email = os.getenv("ENTREZ_EMAIL", "default_email@example.com")
-    # Use the db and reftype parameters passed to the function
-    handle = Entrez.efetch(db=db, id=ids, rettype=reftype)
-    return handle.read()
-
-if __name__ == "__main__":
-    import os
-    import time
-    from Bio import Entrez
-    from urllib.error import HTTPError # Import for specific error handling
-
-    # --- NCBI Entrez Email Setup ---
-    entrez_email_address = os.getenv("ENTREZ_EMAIL")
-    if not entrez_email_address:
-        print("WARNING: The ENTREZ_EMAIL environment variable is not set.")
-        print("NCBI requires a valid email address for Entrez queries to prevent abuse.")
-        print('Please set this variable, e.g., in your shell: `export ENTREZ_EMAIL="your.name@example.com"`')
-        print("Using a default placeholder email for this run, which may lead to NCBI blocking requests.")
-        Entrez.email = "default_cli_placeholder@example.com"
-    else:
-        Entrez.email = entrez_email_address
-        print(f"Using Entrez email: {Entrez.email}")
-
-    print("\n--- Querying NCBI Entrez for Database Information ---")
-    print("Attempting to fetch the list of all available Entrez databases...")
-
-    all_databases = []
+    # Ensure ENTREZ_EMAIL is set
+    email = os.getenv("ENTREZ_EMAIL")
+    if not email:
+        raise ValueError("ENTREZ_EMAIL environment variable must be set for NCBI Entrez queries")
+    
+    Entrez.email = email
+    
     try:
-        # Fetch the global list of databases
-        handle = Entrez.einfo()
-        record = Entrez.read(handle)
+        # Fetch the data
+        handle = Entrez.efetch(db=db, id=ids, rettype=reftype, retmode="text")
+        data = handle.read()
         handle.close()
-        all_databases = record['DbList']
-        print(f"Successfully fetched {len(all_databases)} database names.")
-        # print(f"Databases found: {all_databases}") # Uncomment to see the full list immediately
+        return data
+    except HTTPError as he:
+        # Re-raise HTTPError to be caught by the calling function
+        raise he
     except Exception as e:
-        print(f"FATAL ERROR: Could not fetch the list of Entrez databases: {type(e).__name__} - {e}")
-        print("Cannot proceed without the database list.")
-        exit(1) # Exit if we can't get the basic list
-
-    print("\n--- Retrieving Rettpye/Retmode for each Database ---")
-    print("This may take some time as it queries NCBI for each database...")
-
-    db_info_results = {}
-    databases_with_errors = []
-
-    # Limit requests per second to NCBI
-    requests_per_second_limit = 3 # NCBI recommends no more than 3 requests/sec without an API key
-    delay_between_requests = 1.0 / requests_per_second_limit
-
-    for db_name in all_databases:
-        print(f"Querying info for database: '{db_name}'...")
-        retries = 3 # Allow a few retries for transient network issues
-        success = False
-        for attempt in range(retries):
-            try:
-                handle = Entrez.einfo(db=db_name)
-                record = Entrez.read(handle)
-                handle.close()
-
-                # Extract rettype and retmode lists
-                db_info = record.get('DbInfo', {})
-                rettype_list = db_info.get('RetTypeList', [])
-                retmode_list = db_info.get('RetModeList', [])
-
-                db_info_results[db_name] = {
-                    'rettypes': rettype_list,
-                    'retmodes': retmode_list
-                }
-                print(f"  -> Success: Found {len(rettype_list)} rettypes, {len(retmode_list)} retmodes.")
-                success = True
-                break # Exit retry loop on success
-
-            except HTTPError as e:
-                # Specific handling for HTTP errors (e.g., 4xx, 5xx) which might indicate db issues
-                print(f"  -> HTTP Error for '{db_name}' (Attempt {attempt+1}/{retries}): {e.code} {e.reason}")
-                # Don't retry immediately on persistent client/server errors like 400 or 404
-                if e.code >= 400 and e.code < 500:
-                     databases_with_errors.append((db_name, f"HTTP {e.code} {e.reason}"))
-                     break
-                # For server errors (5xx) or others, wait and retry
-                time.sleep(delay_between_requests * (attempt + 1)) # Exponential backoff basic
-
-            except Exception as e:
-                # General error handling
-                print(f"  -> ERROR querying '{db_name}' (Attempt {attempt+1}/{retries}): {type(e).__name__} - {e}")
-                time.sleep(delay_between_requests * (attempt + 1)) # Basic backoff
-
-        if not success and (db_name, f"Max retries reached or non-retryable error") not in databases_with_errors:
-             databases_with_errors.append((db_name, "Failed after multiple attempts or non-retryable HTTP error"))
-             print(f"  -> FAILED to get info for '{db_name}' after {retries} attempts.")
-
-        # Pause between requests to respect NCBI rate limits
-        time.sleep(delay_between_requests)
-
-    print("\n--- Summary of Supported Rettpes and Retmodes per Database ---")
-
-    # Sort databases alphabetically for consistent output
-    sorted_db_names = sorted(db_info_results.keys())
-
-    for db_name in sorted_db_names:
-        info = db_info_results[db_name]
-        print(f"\nDatabase: {db_name}")
-        if info['rettypes']:
-            print(f"  Supported RetTypes: {info['rettypes']}")
-        else:
-            print("  Supported RetTypes: None found or extraction failed.")
-        if info['retmodes']:
-            print(f"  Supported RetModes: {info['retmodes']}")
-        else:
-            print("  Supported RetModes: None found or extraction failed.")
-
-    if databases_with_errors:
-        print("\n--- Databases with Errors During Query ---")
-        for db_name, error_msg in databases_with_errors:
-            print(f"  Database: {db_name} - Error: {error_msg}")
-
-    print("\nQuerying complete.")
+        # Re-raise other exceptions
+        raise e
 

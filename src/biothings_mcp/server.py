@@ -1,107 +1,134 @@
-from functools import partial
+#!/usr/bin/env python3
+"""Biothings MCP Server - Database query interface for biological data."""
+
 import os
 from pathlib import Path
-from enum import Enum
+from typing import List, Dict, Any, Optional
+import sys
 
-import anyio
-from dotenv import load_dotenv
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 import typer
-from typing_extensions import Annotated
-
-from biothings_mcp.biothings_api import BiothingsRestAPI
-from pycomfort.logging import to_nice_stdout, to_nice_file
 from fastmcp import FastMCP
+from pydantic import BaseModel, Field
+from eliot import start_action
 
-# from biothings_mcp.logging import configure_logging, LoggedTask, log_info
-
-class TransportType(str, Enum):
-    STDIO = "stdio"
-    STREAMABLE_HTTP = "streamable-http"
-    SSE = "sse"
-
-# Load environment variables
-load_dotenv()
+from biothings_mcp.biothings_api import GeneTools, VariantTools, ChemTools, TaxonTools
+from biothings_mcp.download_api import DownloadTools
 
 # Configuration
 DEFAULT_HOST = os.getenv("MCP_HOST", "0.0.0.0")
-DEFAULT_PORT = int(os.getenv("MCP_PORT", "8000"))
+DEFAULT_PORT = int(os.getenv("MCP_PORT", "3001"))
 DEFAULT_TRANSPORT = os.getenv("MCP_TRANSPORT", "streamable-http")
+DEFAULT_OUTPUT_DIR = os.getenv("MCP_OUTPUT_DIR", "biothings_output")
 
-def create_app() -> FastAPI:
-    """Create and configure the FastAPI application"""
-    # Configure logging
-    # configure_logging()
-    # log_info("Starting Biothings MCP server")
+class BiothingsMCP(FastMCP):
+    """Biothings MCP Server with biological data tools that can be inherited and extended."""
     
-    # with LoggedTask("create_app") as task:
-    app = BiothingsRestAPI()
+    def __init__(
+        self, 
+        name: str = "Biothings MCP Server",
+        prefix: str = "biothings_",
+        output_dir: Optional[str] = None,
+        **kwargs
+    ):
+        """Initialize the Biothings tools with FastMCP functionality."""
+        # Initialize FastMCP with the provided name and any additional kwargs
+        super().__init__(name=name, **kwargs)
         
-    # Configure CORS
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-    return app
-
-
-
-cli_app = typer.Typer(help="Biothings MCP Server CLI")
-
-def cli_app_stdio():
-    """CLI app with stdio transport as default"""
-    import sys
-    # If no transport argument is provided, add stdio as default
-    if not any(arg.startswith('--transport') for arg in sys.argv[1:]):
-        sys.argv.extend(['--transport', 'stdio'])
-    cli_app()
+        self.prefix = prefix
+        self.output_dir = output_dir or DEFAULT_OUTPUT_DIR
+        self.download_tools = None  # Initialize as None, will be created if needed
+        # Register our core tools
+        self._register_biothings_tools()
     
-def cli_app_sse():
-    """CLI app that forces SSE transport"""
-    import sys
-    # Remove any existing transport arguments and force sse
-    sys.argv = [arg for arg in sys.argv if not arg.startswith('--transport')]
-    sys.argv.extend(['--transport', 'sse'])
-    cli_app()
-
-@cli_app.command()
-def run_server(
-    host: Annotated[str, typer.Option(help="Host to run the server on.")] = DEFAULT_HOST,
-    port: Annotated[int, typer.Option(help="Port to run the server on.")] = DEFAULT_PORT,
-    transport: Annotated[str, typer.Option(help="Transport type: stdio, streamable-http, or sse")] = DEFAULT_TRANSPORT
-):
-    """Runs the Biothings MCP server."""
-    # Validate transport value
-    if transport not in ["stdio", "streamable-http", "sse"]:
-        typer.echo(f"Invalid transport: {transport}. Must be one of: stdio, streamable-http, sse")
-        raise typer.Exit(1)
+    def _register_biothings_tools(self, include_download_tools: bool = False):
+        """Register Biothings-specific tools."""
+        # Initialize core tool handlers
+        self.gene_tools = GeneTools(self, self.prefix)
+        self.variant_tools = VariantTools(self, self.prefix)
+        self.chem_tools = ChemTools(self, self.prefix)
+        self.taxon_tools = TaxonTools(self, self.prefix)
         
-    app = create_app()
-    mcp = FastMCP.from_fastapi(app=app, port=DEFAULT_PORT)
-
-    # Manually add routes from the original FastAPI app to FastMCP's additional routes
-    if mcp._additional_http_routes is None:
-        mcp._additional_http_routes = []
+        # Register tools from each core handler
+        self.gene_tools.register_tools()
+        self.variant_tools.register_tools()
+        self.chem_tools.register_tools()
+        self.taxon_tools.register_tools()
+        
+        # Conditionally register download tools
+        if include_download_tools:
+            self.download_tools = DownloadTools(self, self.prefix, self.output_dir)
+            self.download_tools.register_tools()
     
-    # Add all routes from the original app.
-    # This should include /docs, /redoc, /openapi.json, and your API routes.
-    for route in app.routes:
-        # We might want to add some filtering here in the future if there are known conflicts,
-        # but for now, let's try adding all of them.
-        mcp._additional_http_routes.append(route)
+    def register_stdio_only(self):
+        """Register tools that are only available for stdio transport."""
+        if self.download_tools is None:
+            self.download_tools = DownloadTools(self, self.prefix, self.output_dir)
+            self.download_tools.register_tools()
+    
+    def run(self, transport: str = "streamable-http", **kwargs):
+        """Run the MCP server with conditional download tools registration."""
+        # Register stdio-only tools for stdio transport
+        if transport == "stdio":
+            self.register_stdio_only()
+        
+        # Call parent run method
+        super().run(transport=transport, **kwargs)
 
-    # Different transports need different arguments
-    if transport == "stdio":
-        anyio.run(partial(mcp.run_async, transport=transport))
-    else:
-        anyio.run(partial(mcp.run_async, transport=transport, host=host, port=port))
+# Initialize the Biothings MCP server (will be created per command)
+mcp = None
 
+# Create typer app
+app = typer.Typer(help="Biothings MCP Server - Database query interface for biological data")
+
+@app.command("run")
+def cli_app(
+    host: str = typer.Option(DEFAULT_HOST, "--host", help="Host to bind to"),
+    port: int = typer.Option(DEFAULT_PORT, "--port", help="Port to bind to"),
+    transport: str = typer.Option("streamable-http", "--transport", help="Transport type"),
+    output_dir: str = typer.Option(DEFAULT_OUTPUT_DIR, "--output-dir", help="Output directory for local files")
+) -> None:
+    """Run the MCP server with specified transport."""
+    mcp = BiothingsMCP(output_dir=output_dir)
+    mcp.run(transport=transport, host=host, port=port)
+
+@app.command("stdio")
+def cli_app_stdio(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    output_dir: str = typer.Option(DEFAULT_OUTPUT_DIR, "--output-dir", help="Output directory for local files")
+) -> None:
+    """Run the MCP server with stdio transport."""
+    mcp = BiothingsMCP(output_dir=output_dir)
+    mcp.run(transport="stdio")
+
+@app.command("sse")
+def cli_app_sse(
+    host: str = typer.Option(DEFAULT_HOST, "--host", help="Host to bind to"),
+    port: int = typer.Option(DEFAULT_PORT, "--port", help="Port to bind to"),
+    output_dir: str = typer.Option(DEFAULT_OUTPUT_DIR, "--output-dir", help="Output directory for local files")
+) -> None:
+    """Run the MCP server with SSE transport."""
+    mcp = BiothingsMCP(output_dir=output_dir)
+    mcp.run(transport="sse", host=host, port=port)
+
+# Standalone CLI functions for direct script access
+def cli_app_run() -> None:
+    """Standalone function for biothings-mcp-run script."""
+    mcp = BiothingsMCP(output_dir=DEFAULT_OUTPUT_DIR)
+    mcp.run(transport="streamable-http", host=DEFAULT_HOST, port=DEFAULT_PORT)
+
+def cli_app_stdio() -> None:
+    """Standalone function for biothings-mcp-stdio script."""
+    mcp = BiothingsMCP(output_dir=DEFAULT_OUTPUT_DIR)
+    mcp.run(transport="stdio")
+
+def cli_app_sse() -> None:
+    """Standalone function for biothings-mcp-sse script."""
+    mcp = BiothingsMCP(output_dir=DEFAULT_OUTPUT_DIR)
+    mcp.run(transport="sse", host=DEFAULT_HOST, port=DEFAULT_PORT)
 
 if __name__ == "__main__":
+    from pycomfort.logging import to_nice_stdout, to_nice_file
+    
     to_nice_stdout()
     # Determine project root and logs directory
     project_root = Path(__file__).resolve().parents[2]
@@ -114,4 +141,4 @@ if __name__ == "__main__":
     
     # Configure file logging
     to_nice_file(output_file=json_log_path, rendered_file=rendered_log_path)
-    cli_app()
+    app()

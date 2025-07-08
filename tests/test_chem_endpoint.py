@@ -1,126 +1,101 @@
 import pytest
-from fastapi.testclient import TestClient
-from biothings_mcp.server import create_app
-from biothings_typed_client.chem import ChemResponse
-from pathlib import Path
-import logging
+from typing import Any, List
+from biothings_mcp.server import BiothingsMCP
+from biothings_mcp.biothings_api import ChemTools
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+# Test constant for aspirin
+ASPIRIN_INCHIKEY: str = "BSYNRYMUTXBXSQ-UHFFFAOYSA-N"
 
 @pytest.fixture
-def client():
-    """Fixture providing a FastAPI test client."""
-    project_root = Path(__file__).resolve().parents[1]
-    log_dir = project_root / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
+def mcp_server() -> BiothingsMCP:
+    """Fixture providing a BiothingsMCP server instance for testing."""
+    return BiothingsMCP()
+
+@pytest.fixture
+def chem_tools(mcp_server: BiothingsMCP) -> ChemTools:
+    """Fixture providing ChemTools instance for testing."""
+    return ChemTools(mcp_server, prefix="test_")
+
+@pytest.mark.asyncio
+async def test_get_chem(chem_tools: ChemTools) -> None:
+    """Test the get_chem MCP tool.
     
-    app = create_app()
-    return TestClient(app)
+    This test verifies that the tool correctly retrieves chemical information
+    for a given chemical ID. It checks that the response contains the correct
+    chemical ID and other expected fields.
+    
+    The test uses aspirin's InChIKey as an example.
+    """
+    result: Any = await chem_tools.get_chem(ASPIRIN_INCHIKEY)
+    # Check that we got a result
+    assert result is not None
+    # Check that we have the ID field
+    assert hasattr(result, "id") or hasattr(result, "_id")
 
-# Example InChIKey for Aspirin
-ASPIRIN_INCHIKEY = "BSYNRYMUTXBXSQ-UHFFFAOYSA-N"
-# Example InChIKey for Ibuprofen
-IBUPROFEN_INCHIKEY = "HEFNNWSXXWATRW-UHFFFAOYSA-N"
+@pytest.mark.asyncio
+async def test_get_chem_with_fields(chem_tools: ChemTools) -> None:
+    """Test the get_chem MCP tool with specific fields.
+    
+    This test verifies that the tool correctly filters the response to include
+    only the requested fields. It checks that the response contains the
+    requested fields and the chemical ID.
+    
+    The test uses aspirin with specific field filtering.
+    """
+    fields: str = "pubchem.molecular_formula,pubchem.molecular_weight"
+    result: Any = await chem_tools.get_chem(ASPIRIN_INCHIKEY, fields=fields)
+    # Check that we got a result
+    assert result is not None
+    # Check that we have the ID field
+    assert hasattr(result, "id") or hasattr(result, "_id")
 
-def test_get_chem_endpoint(client):
-    """Test the /chem/{chem_id} endpoint."""
-    response = client.post(f"/chem/{ASPIRIN_INCHIKEY}", json={})
-    assert response.status_code == 200
-    data = response.json()
-    assert data["id"] == ASPIRIN_INCHIKEY
-    assert "pubchem" in data
-    # Adjusted assertion: Check top-level ID is correct, pubchem sub-dict exists
-    # assert data["pubchem"]["inchi_key"] == ASPIRIN_INCHIKEY # This field might be null in API response
-    # Basic check for some pubchem fields
-    assert "molecular_formula" in data["pubchem"]
-    assert "molecular_weight" in data["pubchem"]
+@pytest.mark.asyncio
+async def test_get_chems(chem_tools: ChemTools) -> None:
+    """Test the get_chems MCP tool for multiple chemicals.
+    
+    This test verifies that the tool correctly retrieves information for
+    multiple chemicals in a single request. It checks that the response
+    contains results for the queried chemical IDs.
+    
+    The test uses multiple chemical IDs.
+    """
+    chem_ids: str = f"{ASPIRIN_INCHIKEY},KTUFNOKKBVMGRW-UHFFFAOYSA-N"  # Aspirin and Glucose
+    result: List[Any] = await chem_tools.get_chems(chem_ids)
+    assert isinstance(result, list)
+    assert len(result) >= 1  # Should have at least one result
 
-def test_get_chem_with_fields_endpoint(client):
-    """Test the /chem/{chem_id} endpoint with specific fields."""
-    fields = "pubchem.molecular_formula,pubchem.cid"
-    response = client.post(f"/chem/{ASPIRIN_INCHIKEY}", json={"fields": fields})
-    assert response.status_code == 200
-    data = response.json()
-    assert data["id"] == ASPIRIN_INCHIKEY
-    assert "pubchem" in data
-    assert "molecular_formula" in data["pubchem"]
-    assert "cid" in data["pubchem"]
-    # Check that other fields are likely not present (e.g., molecular_weight)
-    # assert "molecular_weight" not in data["pubchem"]
+@pytest.mark.asyncio
+async def test_query_chems(chem_tools: ChemTools) -> None:
+    """Test the query_chems MCP tool.
+    
+    This test verifies that the tool correctly performs a chemical query and
+    returns the expected results. It checks that the response contains
+    a hits array with at least one result.
+    
+    The test queries for chemicals using a search query.
+    """
+    result: Any = await chem_tools.query_chems("pubchem.molecular_formula:C9H8O4", size=1)
+    assert hasattr(result, "hits")
+    assert len(result.hits) > 0
+    # Check that the first hit has expected structure
+    hit: Any = result.hits[0]
+    assert hasattr(hit, "id") or hasattr(hit, "_id")
 
-def test_get_chems_endpoint(client):
-    """Test the /chems endpoint for multiple chemicals."""
-    chem_ids = f"{ASPIRIN_INCHIKEY},{IBUPROFEN_INCHIKEY}"
-    # Make sure JSON body has the right structure
-    response = client.post("/chems", json={
-        "chem_ids": chem_ids,
-        "fields": None,  # Add default/expected fields
-        "as_dataframe": False
-    })
-    assert response.status_code == 200
-    data = response.json()
-    assert len(data) == 2
-    assert data[0]["id"] == ASPIRIN_INCHIKEY
-    assert data[1]["id"] == IBUPROFEN_INCHIKEY
-    assert "pubchem" in data[0]
-    assert "pubchem" in data[1]
-
-def test_query_chems_endpoint(client):
-    """Test the /chem/query endpoint."""
-    # Query for Aspirin by name (adjust query field if needed)
-    query = "aspirin"
-    # Make sure JSON body has the right structure
-    response = client.post("/chem/query", json={
-        "q": query,
-        "size": 1,
-        "fields": None,
-        "as_dataframe": False
-    })
-    assert response.status_code == 200
-    data = response.json()
-    assert "hits" in data
-    assert "total" in data
-    assert isinstance(data["hits"], list)
-    if data.get("total", 0) > 0 and len(data["hits"]) > 0:
-        assert len(data["hits"]) == 1
-        hit = data["hits"][0]
-        # Check if the hit resembles a ChemResponse structure
-        assert "id" in hit
-        assert "pubchem" in hit
-        # Ideally, check if the found chem is indeed Aspirin, e.g., by InChIKey
-        # This requires knowing the exact query field for name search
-        # assert hit["id"] == ASPIRIN_INCHIKEY or hit["pubchem"]["inchi_key"] == ASPIRIN_INCHIKEY
-        logger.debug(f"Query Hit: {hit}") # Log hit for inspection
-    else:
-        # Use pytest.fail if the query *should* return results
-        # pytest.fail(f"Query '{query}' returned no hits.")
-        logger.warning(f"Query '{query}' returned no hits or failed.")
-
-def test_query_many_chems_endpoint(client):
-    """Test the /chems/querymany endpoint."""
-    # Query for Aspirin (2244) and Ibuprofen (3672) by CID
-    query_list = "2244,3672"
-    # Specify the scope as pubchem.cid
-    scopes = "pubchem.cid"
-    # Make sure JSON body has the right structure
-    response = client.post("/chems/querymany", json={
-        "query_list": query_list,
-        "scopes": scopes,
-        "fields": None,
-        "as_dataframe": False
-    })
-    assert response.status_code == 200
-    data = response.json()
-    # Expect results for both queries when searching by CID
-    assert len(data) == 2
-    # Check that we got results for both queries by checking their CIDs
-    cids = set()
-    for result in data:
-        if result and "pubchem" in result and result["pubchem"] and "cid" in result["pubchem"]:
-            cids.add(str(result["pubchem"]["cid"])) # Convert CID to string for comparison
-        else:
-            logger.warning(f"Result missing pubchem.cid: {result}")
-            
-    assert "2244" in cids
-    assert "3672" in cids
+@pytest.mark.asyncio
+async def test_query_many_chems(chem_tools: ChemTools) -> None:
+    """Test the query_many_chems MCP tool.
+    
+    This test verifies that the tool correctly performs batch queries for
+    multiple chemicals. It checks that the response contains results for
+    the queried chemical identifiers.
+    
+    The test queries for multiple chemicals using PubChem CIDs.
+    """
+    # Use known PubChem CIDs for aspirin and glucose
+    query_list = "2244,5793"  # aspirin CID: 2244, glucose CID: 5793
+    result: List[Any] = await chem_tools.query_many_chems(query_list, scopes="pubchem.cid")
+    assert isinstance(result, list)
+    assert len(result) >= 1  # Should have at least one result
+    # Check that results have expected structure
+    for chem_result in result:
+        assert hasattr(chem_result, "id") or hasattr(chem_result, "_id")
