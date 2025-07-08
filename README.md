@@ -41,8 +41,6 @@ The server includes local file saving capabilities through the `DownloadTools` i
 ### Download Tools
 - **`download_entrez_data`**: Download data from NCBI Entrez databases (returns content as string)
 - **`download_entrez_data_local`**: Download data from NCBI Entrez databases and save to local file
-- **`perform_pairwise_alignment`**: Perform pairwise sequence alignment (returns alignment results)
-- **`perform_pairwise_alignment_local`**: Perform pairwise sequence alignment and save results to local file
 
 ### Output Directory Management
 - **Default Location**: Files are saved to `biothings_output/` directory in the current working directory
