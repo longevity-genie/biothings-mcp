@@ -1,6 +1,6 @@
 [project]
 name = "biothings-mcp"
-version = "0.1.3"
+version = "0.1.6"
 description = "MCP for Biothings"
 readme = "README.md"
 authors = [
@@ -17,11 +17,12 @@ dependencies = [
     "sqlite-utils>=3.38",
     "huggingface-hub>=0.33.2",
     "typer>=0.16.0",
+    "hishel<0.5",
 ]
 
 [project.scripts]
 biothings-mcp = "biothings_mcp.server:cli_app_stdio"
-server = "biothings_mcp.server:cli_app"
+server = "biothings_mcp.server:app"
 stdio = "biothings_mcp.server:cli_app_stdio"
 sse = "biothings_mcp.server:cli_app_sse"
 

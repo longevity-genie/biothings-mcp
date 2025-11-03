@@ -81,24 +81,36 @@ uvx biothings-mcp
 
 # Or explicitly specify stdio mode
 uvx --from biothings-mcp stdio
+
+# With custom output directory
+uvx --from biothings-mcp stdio --output-dir ./my_data
 ```
 
-#### HTTP Mode (Web Server)
+#### HTTP Streamable Mode (Web Server)
 ```bash
-# Run the server in streamable HTTP mode on default ( 3001 ) port
-uvx biothings-mcp
+# Run the server in streamable HTTP mode on default port (3001)
+uvx --from biothings-mcp server run
 
-# Run on a specific port
-uvx biothings-mcp server --port 8000
+# Run on a custom port
+uvx --from biothings-mcp server run --port 8000
+
+# Run on custom host and port
+uvx --from biothings-mcp server run --host 0.0.0.0 --port 8000
+
+# With custom output directory
+uvx --from biothings-mcp server run --output-dir ./my_data
 ```
 
 #### SSE Mode (Server-Sent Events)
 ```bash
-# Run the server in SSE mode
-uvx biothings-mcp sse
+# Run the server in SSE mode on default port (3001)
+uvx --from biothings-mcp sse
+
+# Run on a custom port
+uvx --from biothings-mcp sse --port 8000
 ```
 
-The HTTP mode will start a web server that you can access at `http://localhost:3001/mcp` (with documentation at `http://localhost:3001/docs`). The STDIO mode is designed for MCP clients that communicate via standard input/output, while SSE mode uses Server-Sent Events for real-time communication.
+The HTTP streamable mode will start a web server that you can access at `http://localhost:3001/mcp` (with documentation at `http://localhost:3001/docs`). The STDIO mode is designed for MCP clients that communicate via standard input/output, while SSE mode uses Server-Sent Events for real-time communication.
 
 
 ## Configuring your (Anthropic Claude Desktop, Cursor, Windsurf, etc.)
@@ -141,7 +153,7 @@ After that you can explore its methods with MCP Inspector at http://127.0.0.1:62
 
 ```bash
 # Clone the repository
-git clone git@github.com:longevity-genie/biothings-mcp.git
+git clone https://github.com/longevity-genie/biothings-mcp.git
 cd biothings-mcp
 uv sync
 ```
@@ -151,8 +163,20 @@ uv sync
 If you already cloned the repo you can run the server with uv
 
 ```bash
-# Start the MCP server locally
-uv run server
+# Start the MCP server in HTTP streamable mode (default port 3001)
+uv run server run
+
+# Run in STDIO mode
+uv run stdio
+
+# Run in SSE mode
+uv run sse
+
+# Run with custom port
+uv run server run --port 8000
+
+# Run with custom output directory
+uv run server run --output-dir ./my_data
 ```
 
 
