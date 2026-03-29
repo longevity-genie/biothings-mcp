@@ -55,6 +55,10 @@ The server includes local file saving capabilities through the `DownloadTools` i
 - **JSON**: `.json` extension for structured data
 - **Text**: `.txt` extension for general text data
 
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/longevity-genie-biothings-mcp).
+
 ## Quick Start
 
 ### Installing uv
